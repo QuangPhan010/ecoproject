@@ -1,0 +1,142 @@
+﻿{% extends "shops/base.html" %} {% block title %}Quản lý danh mục | QShop{% endblock %} {% block content %}
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #212529;
+    --muted: #6c757d;
+    --border: #e5e7eb;
+    --hover: rgba(13, 110, 253, 0.05);
+  }
+
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  /* CARD */
+  .card {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+  }
+
+  /* INPUT */
+  input.form-control {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border);
+  }
+
+  input.form-control::placeholder {
+    color: var(--muted);
+  }
+
+  input.form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.15);
+  }
+
+  /* LIST ITEM */
+  .list-group-item {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border-color: var(--border);
+    transition: 0.2s;
+  }
+
+  .category-row:hover {
+    background: var(--hover) !important;
+  }
+
+  /* CATEGORY TEXT */
+  .category-row .text-muted {
+    color: var(--muted) !important;
+  }
+
+  /* ACTION BUTTONS */
+  .category-actions .btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+
+
+
+</style>
+
+<div class="container my-4" style="max-width: 760px">
+  <!-- HEADER -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">📂 Quản lý danh mục</h4>
+    <span class="text small">
+      Tổng: {{ categories|length }} danh mục
+    </span>
+  </div>
+
+  <!-- ADD CATEGORY -->
+  <div class="card p-3 mb-4 shadow-sm">
+    <form
+      method="post"
+      action="{% url 'shops:category_create' %}"
+      class="d-flex gap-2"
+    >
+      {% csrf_token %}
+      <input
+        type="text"
+        name="name"
+        class="form-control"
+        placeholder="Nhập tên danh mục mới…"
+        required
+      />
+      <button class="btn btn-primary px-4">
+        <i class="bi bi-plus-circle"></i> Thêm
+      </button>
+    </form>
+  </div>
+
+  <!-- LIST CATEGORY -->
+  <div class="card shadow-sm">
+    <ul class="list-group list-group-flush">
+      {% for c in categories %}
+      <li
+        class="list-group-item category-row d-flex justify-content-between align-items-center"
+      >
+        <div>
+          <div class="fw-semibold">{{ c.name }}</div>
+          <div class="small text-muted">{{ c.slug }}</div>
+        </div>
+
+        <div class="category-actions btn-group btn-group-sm">
+          <a
+            href="{% url 'shops:category_edit' c.id %}"
+            class="btn btn-outline-warning"
+            title="Sửa"
+          >
+            <i class="bi bi-pencil"></i>
+          </a>
+          <a
+            href="{% url 'shops:category_delete' c.id %}"
+            class="btn btn-outline-danger"
+            title="Xóa"
+            onclick="return confirm('Xóa danh mục này?');"
+          >
+            <i class="bi bi-trash"></i>
+          </a>
+        </div>
+      </li>
+      {% empty %}
+      <li class="list-group-item text-center text-muted py-4">
+        Chưa có danh mục nào
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
+

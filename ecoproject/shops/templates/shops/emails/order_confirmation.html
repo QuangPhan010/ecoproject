@@ -1,0 +1,59 @@
+{% load humanize %}
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <title>Xác nhận đơn hàng</title>
+  </head>
+  <body style="font-family: Arial, sans-serif; color: #111827; background: #f9fafb; padding: 20px;">
+    <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px;">
+      <h2 style="margin: 0 0 8px;">QSHOP - Xác nhận đơn hàng</h2>
+      <p style="margin: 0 0 12px;">Đơn hàng <strong>#{{ order.id }}</strong> đã được tạo thành công.</p>
+
+      <p style="margin: 0 0 6px;"><strong>Người nhận:</strong> {{ order.user.get_full_name|default:order.user.username }}</p>
+      <p style="margin: 0 0 6px;"><strong>SĐT:</strong> {{ order.phone }}</p>
+      <p style="margin: 0 0 12px;"><strong>Địa chỉ:</strong> {{ order.address }}</p>
+
+      <p style="margin: 0 0 6px;"><strong>Thanh toán:</strong> {{ payment_label }}</p>
+
+      <h3 style="margin: 16px 0 8px;">Chi tiết sản phẩm</h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <thead>
+          <tr style="background: #f3f4f6;">
+            <th align="left" style="padding: 8px; border: 1px solid #e5e7eb;">Sản phẩm</th>
+            <th align="right" style="padding: 8px; border: 1px solid #e5e7eb;">SL</th>
+            <th align="right" style="padding: 8px; border: 1px solid #e5e7eb;">Đơn giá</th>
+            <th align="right" style="padding: 8px; border: 1px solid #e5e7eb;">Thành tiền</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in order_items %}
+          <tr>
+            <td style="padding: 8px; border: 1px solid #e5e7eb;">{{ item.product.name }}</td>
+            <td align="right" style="padding: 8px; border: 1px solid #e5e7eb;">{{ item.quantity }}</td>
+            <td align="right" style="padding: 8px; border: 1px solid #e5e7eb;">{{ item.price|intcomma }} VND</td>
+            <td align="right" style="padding: 8px; border: 1px solid #e5e7eb;">{{ item.total_cost|intcomma }} VND</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="4" style="padding: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">
+              Không có sản phẩm.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div style="margin-top: 12px;">
+        <p style="margin: 0 0 6px;"><strong>Phí vận chuyển:</strong> {{ order.shipping_cost|intcomma }} VND</p>
+        <p style="margin: 0 0 6px;"><strong>Giảm giá:</strong> {{ order.discount|intcomma }} VND</p>
+        <p style="margin: 0;"><strong>Tổng cộng:</strong> {{ order.total_price|intcomma }} VND</p>
+      </div>
+
+      <p style="margin-top: 16px;">
+        Bạn có thể xem đơn hàng trong lịch sử mua hàng:
+        <a href="{{ order_history_url }}">{{ order_history_url }}</a>
+      </p>
+    </div>
+  </body>
+</html>

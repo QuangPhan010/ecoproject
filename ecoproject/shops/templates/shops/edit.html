@@ -1,0 +1,225 @@
+﻿{% extends "shops/base.html" %}
+{% block title %}Edit Product | QShop{% endblock %}
+{% block content %}
+
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #212529;
+    --muted: #6c757d;
+    --border: #e5e7eb;
+  }
+  body {
+    background: var(--bg);
+  }
+
+  .card {
+    background: var(--card);
+    color: var(--text);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+  .form-label {
+    font-weight: 600;
+  }
+
+  input,
+  textarea,
+  select {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    border-color: #0d6efd !important;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.15) !important;
+  }
+
+  .section-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    border-left: 4px solid #0d6efd;
+    padding-left: 10px;
+  }
+
+  .preview-img {
+    width: 100%;
+    height: 260px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    margin-bottom: 10px;
+  }
+
+  .btn-save {
+    padding: 10px;
+    font-weight: 600;
+  }
+  small.text-muted {
+    font-size: 13px;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="card shadow-sm p-4">
+        <h4 class="mb-4">✏️ Chỉnh sửa sản phẩm</h4>
+
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+
+          <div class="row g-4">
+            <!-- LEFT -->
+            <div class="col-md-4">
+              <div class="section-title">Hình ảnh hiện tại</div>
+
+              {% if product.image %}
+              <img src="{{ product.image }}" class="preview-img" />
+              {% else %}
+              <div class="preview-img d-flex align-items-center justify-content-center text-muted">
+                Chưa có hình ảnh
+              </div>
+              {% endif %}
+
+              <label class="form-label mt-2">Đổi hình ảnh</label>
+              {{ form.image }}
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-md-8">
+              <div class="section-title">Thông tin cơ bản</div>
+
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Tên sản phẩm</label>
+                  {{ form.name }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Slug</label>
+                  {{ form.slug }}
+                  <small class="text-muted">Slug chỉ tự đổi nếu bạn chưa sửa thủ công</small>
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Giá bán</label>
+                  {{ form.price }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Giá cũ</label>
+                  {{ form.old_price }}
+                </div>
+
+                <!-- CATEGORY -->
+                <div class="col-md-6">
+                  <label class="form-label">Danh mục</label>
+                  <select name="category" class="form-select">
+                    <option value="">-- Chọn danh mục --</option>
+                    {% for c in categories %}
+                      <option value="{{ c.id }}" {% if product.category and product.category.id == c.id %}selected{% endif %}>
+                        {{ c.name }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+
+              <div class="section-title mt-4">Kho hàng</div>
+
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Tồn kho</label>
+                  {{ form.stock }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Trạng thái</label>
+                  {{ form.available }}
+                </div>
+              </div>
+
+              <div class="section-title mt-4">Mô tả sản phẩm</div>
+              {{ form.description }}
+
+              <!-- OPTIONS -->
+              <div class="section-title mt-4">Phiên bản sản phẩm</div>
+
+              <input
+                type="text"
+                name="options_raw"
+                class="form-control mb-2"
+                value="{% for o in product.options.all %}{{ o.name }}{% if not forloop.last %}, {% endif %}{% endfor %}"
+              />
+
+              <small class="text-muted">Phân cách bằng dấu phẩy (,)</small>
+
+              <!-- COLORS -->
+              <div class="section-title mt-4">Màu sắc sản phẩm</div>
+
+              <input
+                type="text"
+                name="colors_raw"
+                class="form-control mb-2"
+                value="{% for c in product.colors.all %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}"
+              />
+
+              <small class="text-muted">Hệ thống tự map sang mã màu</small>
+            </div>
+          </div>
+
+          <hr class="my-4" />
+
+          <div class="d-flex justify-content-between">
+            <a href="{% url 'shops:product' %}" class="btn btn-outline-secondary">
+              ⬅ Quay lại
+            </a>
+            <button type="submit" class="btn btn-primary btn-save">
+              💾 Lưu thay đổi
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AUTO SLUG (SMART MODE) -->
+<script>
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  const nameInput = document.getElementById("id_name");
+  const slugInput = document.getElementById("id_slug");
+
+  if (nameInput && slugInput) {
+    const originalSlug = slugInput.value;
+    let slugManuallyEdited = false;
+
+    slugInput.addEventListener("input", () => {
+      slugManuallyEdited = slugInput.value !== originalSlug;
+    });
+
+    nameInput.addEventListener("input", () => {
+      if (!slugManuallyEdited) {
+        slugInput.value = slugify(nameInput.value);
+      }
+    });
+  }
+</script>
+
+{% endblock %}
+

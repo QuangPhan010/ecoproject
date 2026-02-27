@@ -1,0 +1,97 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-4">
+  <h4 class="mb-3">📊 Thống kê doanh thu</h4>
+
+  <!-- SUMMARY -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card"><div class="card-body">
+        <div class="text-muted">Tổng doanh thu</div>
+        <div class="fs-5 fw-bold">{{ total_revenue|intcomma }} VND</div>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body">
+        <div class="text-muted">30 ngày qua</div>
+        <div class="fs-5 fw-bold">{{ monthly_revenue|intcomma }} VND</div>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body">
+        <div class="text-muted">7 ngày qua</div>
+        <div class="fs-5 fw-bold">{{ weekly_revenue|intcomma }} VND</div>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body">
+        <div class="text-muted">Bán chạy nhất</div>
+        {% if top_product %}
+          <div class="fw-bold">{{ top_product.product__name }}</div>
+          <small>{{ top_product.total_qty }} sản phẩm</small>
+        {% else %}
+          <small>Chưa có</small>
+        {% endif %}
+      </div></div>
+    </div>
+  </div>
+
+  <!-- CHỌN THÁNG -->
+ <form method="get" class="mb-3 d-flex align-items-center gap-2">
+  <label class="fw-semibold mb-0">📅 Chọn tháng:</label>
+
+  <input
+    type="month"
+    name="month"
+    value="{{ selected_month }}"
+    class="form-control"
+    style="max-width: 180px"
+    onchange="this.form.submit()"
+  />
+</form>
+
+
+  <!-- TOGGLE -->
+  <div class="btn-group mb-3">
+    <button class="btn btn-outline-primary chart-btn active" data-type="day">24h</button>
+    <button class="btn btn-outline-primary chart-btn" data-type="week">7 ngày</button>
+    <button class="btn btn-outline-primary chart-btn" data-type="month">30 ngày</button>
+    {% if picked_labels %}
+    <button class="btn btn-outline-primary chart-btn" data-type="picked">Tháng chọn</button>
+    {% endif %}
+  </div>
+
+  <canvas id="revenueChart" height="100"></canvas>
+
+  <hr>
+
+  <h6>🥧 Trạng thái đơn hàng</h6>
+
+<div class="d-flex justify-content-center">
+  <div style="width:260px; height:260px;">
+    <canvas id="statusPieChart"></canvas>
+  </div>
+</div>
+
+
+  {{ day_labels|json_script:"day-labels" }}
+  {{ day_data|json_script:"day-data" }}
+  {{ week_labels|json_script:"week-labels" }}
+  {{ week_data|json_script:"week-data" }}
+  {{ month_labels|json_script:"month-labels" }}
+  {{ month_data|json_script:"month-data" }}
+  {{ picked_labels|json_script:"picked-labels" }}
+  {{ picked_data|json_script:"picked-data" }}
+  {{ pie_labels|json_script:"pie-labels" }}
+  {{ pie_data|json_script:"pie-data" }}
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{% static 'js/stats.js' %}"></script>
+{% endblock %}

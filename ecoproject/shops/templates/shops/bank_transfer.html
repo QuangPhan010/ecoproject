@@ -1,0 +1,59 @@
+{% extends "shops/base.html" %} {% load humanize %} {% block title %}Chuyển
+khoản | QShop{% endblock %} {% block content %}
+<div class="container my-5">
+  <div class="row justify-content-center">
+    <div class="col-md-6">
+      <div class="card p-4 shadow-sm text-center">
+        <h4 class="mb-3">💳 Chuyển khoản ngân hàng</h4>
+
+        <p class="text-muted">
+          Vui lòng chuyển khoản đúng thông tin bên dưới.<br />
+          Đơn hàng sẽ được xử lý sau khi xác nhận thanh toán.
+        </p>
+
+        <hr />
+
+        <!-- QR CODE -->
+        <img
+          src="https://img.vietqr.io/image/MB-9701042006-compact.png?amount={{ order.total_price }}&addInfo=QSHOP{{ order.id }}&accountName=PHAN%20VAN%20TAN%20QUANG"
+          alt="QR chuyển khoản"
+          style="max-width: 280px"
+        />
+
+        <!-- BANK INFO -->
+        <div class="text-start mt-3">
+          <p><strong>Ngân hàng:</strong> MBBank</p>
+          <p><strong>Số tài khoản:</strong> 9701042006</p>
+          <p><strong>Chủ tài khoản:</strong> PHAN VAN TAN QUANG</p>
+          <p>
+            <strong>Số tiền:</strong>
+            <span class="text-danger fw-bold">
+              {{ order.total_price|intcomma }}₫
+            </span>
+          </p>
+          <p>
+            <strong>Nội dung chuyển khoản:</strong><br />
+            <span class="badge bg-warning text-dark fs-6">
+              QSHOP{{ order.id }}
+            </span>
+          </p>
+        </div>
+
+        <hr />
+
+        <div class="alert alert-warning small">
+          ⚠ <strong>Lưu ý:</strong> Nhập <b>đúng nội dung chuyển khoản</b> để hệ
+          thống xác nhận nhanh hơn.
+        </div>
+
+        <a
+          href="{% url 'shops:order_history' %}"
+          class="btn btn-outline-secondary mt-2"
+        >
+          Xem đơn hàng của tôi
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

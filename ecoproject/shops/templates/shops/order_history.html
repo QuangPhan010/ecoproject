@@ -1,0 +1,237 @@
+{% extends "shops/base.html" %} {% load humanize %} {% load static%} 
+{% block title %}Lịch sử đơn hàng | QShop{% endblock %} {% block content %}
+<link rel="stylesheet" href="{% static 'css/order_history.css' %}" />
+
+<div class="container mt-4 mb-5">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-receipt me-1"></i> Lịch sử đơn hàng</h4>
+    {% if user.is_staff or user.is_superuser %}
+    <a class="btn btn-sm btn-outline-primary" target="_blank" href="{% url 'shops:order_bills_all_pdf' %}">
+      Xuất tất cả hóa đơn (PDF)
+    </a>
+    {% endif %}
+  </div>
+
+  {% if is_admin %}
+  <form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-5">
+      <label class="form-label">Khách hàng</label>
+      <select name="customer" class="form-select">
+        <option value="">Tất cả</option>
+        {% for c in customers %}
+        <option value="{{ c.user_id }}" {% if selected_customer == c.user_id|stringformat:"s" %}selected{% endif %}>
+          {{ c.user__username }}{% if c.user__email %} ({{ c.user__email }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Trạng thái</label>
+      <select name="status" class="form-select">
+        <option value="">Tất cả</option>
+        {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 d-flex gap-2">
+      <button class="btn btn-primary w-100">Lọc</button>
+      <a class="btn btn-outline-secondary w-100" href="{% url 'shops:order_history' %}">Xóa lọc</a>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if orders %}
+  <div class="accordion" id="ordersAccordion">
+    {% for order in orders %}
+    <div class="accordion-item order-card mb-3">
+      <!-- HEADER -->
+      <h2 class="accordion-header">
+        <button
+          class="accordion-button collapsed order-header"
+          data-bs-toggle="collapse"
+          data-bs-target="#collapse{{ order.id }}"
+        >
+          <div class="w-100 d-flex justify-content-between align-items-center">
+            <div>
+              <strong>Đơn hàng #{{ order.id }}</strong>
+              <div class="small text-muted">
+                {{ order.created_at|date:"d/m/Y H:i" }}
+              </div>
+              {% if is_admin %}
+              <div class="small text-muted">
+                Khách: {{ order.user.get_full_name|default:order.user.username }}
+                {% if order.user.email %}({{ order.user.email }}){% endif %}
+              </div>
+              {% endif %}
+            </div>
+
+            <div class="text-end">
+              <div class="fw-semibold text-danger">
+                {{ order.total_price|intcomma }}₫
+              </div>
+
+              {% if order.status == "Pending" %}
+              <span class="badge badge-status badge-pending">Chờ xử lý</span>
+              {% elif order.status == "Processing" %}
+              <span class="badge badge-status badge-processing"
+                >Đang xử lý</span
+              >
+              {% elif order.status == "Shipped" %}
+              <span class="badge badge-status badge-shipped">Đang giao</span>
+              {% elif order.status == "Delivered" %}
+              <span class="badge badge-status badge-delivered">Hoàn thành</span>
+              {% elif order.status == "Cancelled" %}
+              <span class="badge badge-status badge-cancelled">Đã huỷ</span>
+              {% endif %}
+            </div>
+          </div>
+        </button>
+      </h2>
+
+      <!-- BODY -->
+      <div
+        id="collapse{{ order.id }}"
+        class="accordion-collapse collapse"
+        data-bs-parent="#ordersAccordion"
+      >
+        <div class="accordion-body">
+          <!-- TIMELINE -->
+          <div class="order-timeline">
+            <div
+              class="timeline-step {% if order.status != 'Pending' %}timeline-active{% endif %}"
+            >
+              <div class="timeline-dot"></div>
+              <div class="timeline-label">Chờ xử lý</div>
+            </div>
+
+            <div
+              class="timeline-step {% if order.status == 'Processing' or order.status == 'Shipped' or order.status == 'Delivered' %}timeline-active{% endif %}"
+            >
+              <div class="timeline-dot"></div>
+              <div class="timeline-label">Đang xử lý</div>
+            </div>
+
+            <div
+              class="timeline-step {% if order.status == 'Shipped' or order.status == 'Delivered' %}timeline-active{% endif %}"
+            >
+              <div class="timeline-dot"></div>
+              <div class="timeline-label">Đang giao</div>
+            </div>
+
+            <div
+              class="timeline-step {% if order.status == 'Delivered' %}timeline-active{% endif %}"
+            >
+              <div class="timeline-dot"></div>
+              <div class="timeline-label">Hoàn thành</div>
+            </div>
+          </div>
+
+          <!-- CUSTOMER INFO -->
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <div class="fw-semibold mb-1">👤 Người nhận</div>
+              <div class="order-meta">
+                <span
+                  ><strong>Tên:</strong>
+                  {{ order.user.get_full_name|default:order.user.username }}
+                </span>
+                <span><strong>SĐT:</strong> {{ order.phone }}</span>
+                <span><strong>Địa chỉ:</strong> {{ order.address }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-6 text-md-end mt-3 mt-md-0">
+              <div class="fw-semibold mb-1">💳 Thanh toán</div>
+              <span class="text-muted">
+                {{ order.get_payment_method_display }}
+              </span>
+              <div class="mt-2 text-end">
+                <img
+                  src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ order.qr_shipper_url|urlencode }}"
+                  alt="QR đơn hàng"
+                  width="100"
+                  height="100"
+                  class="border rounded bg-white p-1"
+                />
+
+                <div class="small text-muted mt-1">
+                  Quét QR xem chi tiết đơn
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTION -->
+          <div class="d-flex gap-2 flex-wrap">
+            {% if order.status == "Pending" or order.status == "Processing" %}
+            <form method="post" action="{% url 'shops:cancel_order' order.id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-outline-danger">
+                ❌ Huỷ đơn hàng
+              </button>
+            </form>
+            {% else %}
+            <span class="badge bg-secondary">Không thể huỷ</span>
+            {% endif %}
+            {% if is_admin %}
+            <form method="post" action="{% url 'shops:admin_update_order_status' order.id %}" class="d-flex gap-2">
+              {% csrf_token %}
+              <select name="status" class="form-select form-select-sm" style="min-width: 160px;">
+                {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if order.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-outline-success">Cập nhật</button>
+            </form>
+            {% endif %}
+            {% if user.is_staff or user.is_superuser %}
+            <a class="btn btn-sm btn-outline-primary" target="_blank"
+              href="{% url 'shops:order_bill_pdf' order.qr_token %}">
+              Xuất hóa đơn
+            </a>
+            {% endif %}
+          </div>
+
+          <!-- ITEMS -->
+          <div class="table-responsive mt-3">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Sản phẩm</th>
+                  <th class="text-center">SL</th>
+                  <th class="text-end">Giá</th>
+                  <th class="text-end">Tạm tính</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in order.items.all %}
+                <tr>
+                  <td>{{ item.product.name }}</td>
+                  <td class="text-center">{{ item.quantity }}</td>
+                  <td class="text-end">{{ item.price|intcomma }}₫</td>
+                  <td class="text-end fw-semibold">
+                    {{ item.total_cost|intcomma }}₫
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="card order-card p-4 text-center">
+    <div class="fs-1 mb-2">📦</div>
+    <h5>Bạn chưa có đơn hàng nào</h5>
+    <a href="{% url 'shops:product' %}" class="btn btn-primary mt-2">
+      Mua sắm ngay
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

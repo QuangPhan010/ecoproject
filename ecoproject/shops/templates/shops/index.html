@@ -1,0 +1,255 @@
+﻿{% extends "shops/base.html" %} {% load humanize %} {% block title %}Trang chủ |
+QShop{% endblock %} {% block content %}
+<style>
+  .welcome-box {
+    border-radius: 18px;
+    padding: 32px;
+    background: #fff;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  }
+
+  .feature-card {
+    border-radius: 14px;
+    padding: 20px;
+    text-align: center;
+    transition: 0.3s;
+  }
+  .feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  /* ===== PRODUCT CARD ===== */
+  .product-card {
+    border-radius: 16px;
+    overflow: hidden;
+    transition: 0.3s;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+  }
+  .product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  }
+
+  /* IMAGE */
+  .product-img-wrap {
+    width: 100%;
+    height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    padding: 12px;
+  }
+  .flash-sale .product-img-wrap {
+    height: 180px;
+  }
+
+  .product-img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+
+  /* BODY */
+  .product-card .card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  /* TITLE FIX */
+  .product-title {
+    line-height: 1.4;
+    height: 2.8em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .price {
+    font-weight: 600;
+    color: #e11d48;
+  }
+  .old-price {
+    text-decoration: line-through;
+    font-size: 13px;
+    color: #999;
+  }
+
+  .flash-sale {
+    background: linear-gradient(135deg, #ff416c, #ff4b2b);
+    color: #fff;
+    border-radius: 16px;
+    padding: 20px;
+    /* Welcome box */
+
+
+    /* Product card text */
+
+
+
+
+    /* Buttons outline */
+
+
+    /* Feature cards */
+
+    /* Flash sale text */
+  }
+  /* Welcome */
+
+
+  /* Product card text */
+
+
+
+
+  /* Buttons */
+
+
+  /* Feature cards */
+
+  /* Featured title */
+
+  /* Flash sale text */
+</style>
+
+<div class="container mt-4 mb-5">
+  <!-- WELCOME -->
+  <div class="welcome-box text-center mb-4">
+    <h3>
+      👋 Xin chào {{ request.user.first_name|default:request.user.username }}
+    </h3>
+    <p class="text-muted">Chào mừng đến với <b>QShop</b></p>
+    <a href="{% url 'shops:index' %}" class="btn btn-primary">
+      <i class="bi bi-bag"></i> Mua sắm ngay
+    </a>
+  </div>
+
+  {% if flash_sale %}
+  <!-- FLASH SALE -->
+  <div class="flash-sale mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0">⚡ Flash Sale</h5>
+      <span>⏰ Kết thúc sau <b id="flash-timer">--:--:--</b></span>
+    </div>
+
+    <div class="row g-3 align-items-stretch">
+      {% for product in flash_products %}
+      <div class="col-md-3 col-6 d-flex">
+        <div class="card product-card w-100">
+          <div class="product-img-wrap">
+            <img src="{{ product.image }}" class="product-img" />
+          </div>
+
+          <div class="card-body">
+            <h6 class="product-title mb-1">{{ product.name }}</h6>
+
+            <div class="mb-1">
+              <span class="price">{{ product.price|intcomma }}₫</span>
+              {% if product.old_price %}
+              <span class="old-price ms-1">
+                {{ product.old_price|intcomma }}₫
+              </span>
+              {% endif %}
+            </div>
+
+            <div class="small text-muted mb-2">Đã bán {{ product.sold }}</div>
+
+            <div class="mt-auto d-flex gap-2">
+              <a
+                href="{% url 'shops:detail' product.slug %}"
+                class="btn btn-sm btn-outline-primary w-50"
+              >
+                Xem
+              </a>
+              <button class="btn btn-sm btn-primary w-50">
+                <i class="bi bi-cart-plus"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- FEATURED -->
+  <h5 class="mb-3">🌟 Sản phẩm nổi bật</h5>
+
+  <div class="row g-3 mb-3">
+    {% for product in featured_products|slice:":4" %}
+    <div class="col-lg-3 col-md-4 col-6 d-flex">
+      <div class="card product-card w-100">
+        <div class="product-img-wrap">
+          <img src="{{ product.image }}" class="product-img" />
+        </div>
+
+        <div class="card-body">
+          <h6 class="product-title mb-1">{{ product.name }}</h6>
+          <span class="price">{{ product.price|intcomma }}₫</span>
+
+          <div class="mt-auto d-flex gap-2">
+            <a
+              href="{% url 'shops:detail' product.slug %}"
+              class="btn btn-sm btn-outline-primary w-50"
+            >
+              Xem
+            </a>
+            <button class="btn btn-sm btn-primary w-50">
+              <i class="bi bi-cart-plus"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- VIEW MORE -->
+  <div class="text-center">
+    <a href="{% url 'shops:product' %}" class="btn btn-outline-primary px-4">
+      👀 Xem thêm sản phẩm
+    </a>
+  </div>
+
+  {% if flash_sale %}
+  <script>
+    const flashEndTime = new Date(
+      "{{ flash_sale.end_time|date:'Y-m-d H:i:s' }}",
+    ).getTime();
+
+    function updateFlashTimer() {
+      const now = new Date().getTime();
+      const d = flashEndTime - now;
+      const el = document.getElementById("flash-timer");
+      if (!el) return;
+
+      if (d <= 0) {
+        el.innerHTML = "Đã kết thúc";
+        el.style.color = "yellow";
+        return;
+      }
+
+      const h = Math.floor(d / 3600000);
+      const m = Math.floor((d % 3600000) / 60000);
+      const s = Math.floor((d % 60000) / 1000);
+
+      el.innerHTML = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+    setInterval(updateFlashTimer, 1000);
+    updateFlashTimer();
+  </script>
+  {% endif %} {% endblock %}
+</div>
+
+

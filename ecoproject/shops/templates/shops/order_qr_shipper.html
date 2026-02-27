@@ -1,0 +1,45 @@
+{% extends "shops/base.html" %}
+{% block title %}Phiếu giao hàng #{{ order.id }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <div class="card p-4 shadow-sm">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="mb-0">🚚 Phiếu giao hàng #{{ order.id }}</h4>
+      <a class="btn btn-sm btn-outline-primary" target="_blank"
+        href="{% url 'shops:order_shipper_pdf' order.qr_token %}">
+        In PDF (Shipper)
+      </a>
+    </div>
+
+    <p><strong>👤 Người nhận:</strong>
+      {{ order.user.get_full_name|default:order.user.username }}</p>
+    <p><strong>📞 SĐT:</strong> {{ order.phone }}</p>
+    <p><strong>📍 Địa chỉ:</strong> {{ order.address }}</p>
+
+    <hr>
+
+    <p><strong>🚚 Trạng thái:</strong>
+      {{ order.get_status_display|default:order.status }}</p>
+
+    <hr>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Sản phẩm</th>
+          <th>SL</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in order.items.all %}
+        <tr>
+          <td>{{ item.product.name }}</td>
+          <td>{{ item.quantity }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+{% block title %}Chi tiết đơn hàng #{{ order.id }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <div class="card p-4 shadow-sm">
+    <h4 class="mb-3">📦 Đơn hàng #{{ order.id }}</h4>
+
+    <p><strong>👤 Người nhận:</strong>
+      {{ order.user.get_full_name|default:order.user.username }}</p>
+    <p><strong>📞 SĐT:</strong> {{ order.phone }}</p>
+    <p><strong>📍 Địa chỉ:</strong> {{ order.address }}</p>
+
+    <hr>
+
+    <p><strong>💳 Thanh toán:</strong>
+      {{ order.get_payment_method_display }}</p>
+    <p><strong>🚚 Trạng thái:</strong>
+      {{ order.get_status_display|default:order.status }}</p>
+
+    <hr>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Sản phẩm</th>
+          <th>SL</th>
+          <th class="text-end">Giá</th>
+          <th class="text-end">Tạm tính</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in order.items.all %}
+        <tr>
+          <td>{{ item.product.name }}</td>
+          <td>{{ item.quantity }}</td>
+          <td class="text-end">{{ item.price|intcomma }}₫</td>
+          <td class="text-end">{{ item.total_cost|intcomma }}₫</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="text-end fw-bold text-danger">
+      Tổng cộng: {{ order.total_price|intcomma }}₫
+    </div>
+  </div>
+</div>
+{% endblock %}

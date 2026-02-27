@@ -1,0 +1,142 @@
+{% extends "users/base.html" %}
+{% block title %}Đăng ký | QShop{% endblock %}
+
+{% block content %}
+<style>
+.register-container {
+  min-height: 80vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.register-card {
+  width: 100%;
+  max-width: 460px;
+  padding: 32px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+  transition: 0.3s;
+}
+
+
+
+.register-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.register-header i {
+  font-size: 42px;
+  color: #4f46e5;
+}
+
+.register-header h2 {
+  margin-top: 10px;
+  font-weight: bold;
+}
+
+.register-desc {
+  font-size: 14px;
+  color: #777;
+}
+
+.register-card form label {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.register-card input {
+  width: 100%;
+  padding: 11px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  outline: none;
+  transition: 0.2s;
+}
+
+
+
+.register-card input:focus {
+  border-color: #4f46e5;
+}
+
+.register-btn {
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg,#4f46e5,#6366f1);
+  border: none;
+  color: #fff;
+  font-weight: bold;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.register-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 15px rgba(79,70,229,0.4);
+}
+
+.register-footer {
+  text-align: center;
+  font-size: 14px;
+  margin-top: 18px;
+}
+
+.register-footer a {
+  color: #4f46e5;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.register-footer a:hover {
+  text-decoration: underline;
+}
+
+.error-text {
+  font-size: 13px;
+  color: #dc3545;
+}
+</style>
+
+<div class="register-container">
+  <div class="register-card">
+
+    <div class="register-header">
+      <i class="bi bi-shop"></i>
+      <h2>QShop</h2>
+      <div class="register-desc">Tạo tài khoản để bắt đầu mua sắm</div>
+    </div>
+
+    <form action="." method="post">
+      {% csrf_token %}
+
+      {% for field in user_form %}
+        <div class="mb-3">
+          <label>{{ field.label }}</label>
+          {{ field }}
+
+          {% if field.errors %}
+            <div class="error-text">
+              {{ field.errors|striptags }}
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      <button type="submit" class="register-btn mt-2">
+        Tạo tài khoản
+      </button>
+    </form>
+
+    <div class="register-footer">
+      Đã có tài khoản?
+      <a href="{% url 'users:login' %}">Đăng nhập</a>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+    

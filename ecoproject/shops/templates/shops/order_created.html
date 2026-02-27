@@ -1,0 +1,16 @@
+{% extends "shops/base.html" %}
+
+{% block title %}Đặt hàng thành công{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="alert alert-success" role="alert">
+        <h4 class="alert-heading">Đặt hàng thành công!</h4>
+        <p>Cảm ơn bạn đã mua hàng. Đơn hàng của bạn đã được ghi nhận.</p>
+        <hr>
+        <p class="mb-0">Mã đơn hàng của bạn là: <strong>#{{ order.id }}</strong></p>
+    </div>
+    <a href="{% url 'shops:product' %}" class="btn btn-primary">Tiếp tục mua sắm</a>
+    <a href="{% url 'shops:order_history' %}" class="btn btn-secondary">Xem lịch sử đơn hàng</a>
+</div>
+{% endblock %}

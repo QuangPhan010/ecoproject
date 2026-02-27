@@ -1,0 +1,48 @@
+from django.urls import path, reverse_lazy
+from shops import views
+from django.contrib.auth import views as auth_view
+
+app_name = 'shops'
+
+urlpatterns = [
+    path('', views.index, name ='index'),
+    path("product/", views.product, name="product"),
+    path('create/', views.product_create, name='create'),
+    path('delete/<slug:slug>/', views.product_delete, name='delete'),
+    path('edit/<slug:slug>/', views.product_edit, name='edit'),
+    path('categories/', views.category_list, name='category_manage'),
+    path('categories/create/', views.category_create, name='category_create'),
+    path('categories/edit/<int:id>/', views.category_edit, name='category_edit'),
+    path('categories/delete/<int:id>/', views.category_delete, name='category_delete'),
+    path("review/add/<slug:slug>/", views.add_review, name="add_review"),
+    path("review/react/", views.review_react, name="review_react"),
+    path("review/edit/<int:id>/", views.edit_review, name="edit_review"),
+    path("review/delete/<int:id>/", views.delete_review, name="delete_review"),
+    path('cart/add/<int:product_id>/', views.add_to_cart, name='add_to_cart'),
+    path('cart/', views.cart_detail, name='cart_detail'),
+    path('cart/remove/<int:product_id>/', views.remove_from_cart, name='remove_from_cart'),
+    path('cart/update/<int:product_id>/', views.update_cart, name='update_cart'),
+    path('apply-coupon/', views.apply_coupon, name='apply_coupon'),
+    path('checkout/', views.checkout, name='checkout'),
+    path('order-created/', views.order_created, name='order_created'),
+    path('order-history/', views.order_history, name='order_history'),
+    path('bank-transfer/', views.bank_transfer, name='bank_transfer'),
+    path('orders/<int:order_id>/cancel/', views.cancel_order, name='cancel_order'),
+    path('orders/<int:order_id>/status/', views.admin_update_order_status, name='admin_update_order_status'),
+    path('orders/<int:order_id>/qr/', views.order_qr_detail, name='order_qr_detail'),
+    path('q/<uuid:token>/', views.order_qr_public, name='order_qr_public'),
+    path('q/<uuid:token>/bill.pdf', views.order_bill_pdf, name='order_bill_pdf'),
+    path('q/<uuid:token>/shipper.pdf', views.order_shipper_pdf, name='order_shipper_pdf'),
+    path('orders/bills/all.pdf', views.order_bills_all_pdf, name='order_bills_all_pdf'),
+    path('coupon/create/', views.create_coupon, name='coupon_create'),
+    path('coupon/<int:pk>/edit/', views.CouponUpdateView.as_view(), name='coupon_edit'),
+    path('coupon/<int:pk>/delete/', views.CouponDeleteView.as_view(), name='coupon_delete'),
+    path('coupon/stats/', views.coupon_stats, name='coupon_stats'),
+    path('stats/', views.shop_stats, name='shop_stats'),
+    path("calc-shipping/", views.calc_shipping, name="calc_shipping"),
+    path("api/checkout-preview/",views.checkout_preview_api,name="checkout_preview_api"),
+    path("api/checkout-summary/",views.checkout_summary_api,),
+
+    path('<slug:slug>/', views.detail, name='detail'),
+
+]

@@ -1,0 +1,114 @@
+﻿{% extends "shops/base.html" %} {% block title %}Sửa coupon | QShop{% endblock %} {% block content %}
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #212529;
+    --muted: #6c757d;
+    --border: #e5e7eb;
+  }
+
+
+  .card {
+    background: var(--card);
+    color: var(--text);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+
+  .form-label {
+    font-weight: 600;
+  }
+
+  input.form-control,
+  .form-select,
+  .form-check-input {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  input.form-control:focus,
+  .form-select:focus,
+  .form-check-input:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.15);
+  }
+</style>
+
+<div class="container my-4" style="max-width: 620px">
+  <div class="mb-3">
+    <h4 class="mb-1">✏️ Sửa coupon</h4>
+    <div class="text small">Chỉnh sửa thông tin coupon</div>
+  </div>
+
+  <div class="card shadow-sm p-4">
+    <form method="post">
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label class="form-label">Code</label>
+        {{ form.code }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Discount (%)</label>
+        {{ form.discount }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Max discount</label>
+        {{ form.max_discount }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Usage limit</label>
+        {{ form.usage_limit }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Valid from</label>
+        {{ form.valid_from }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Valid to</label>
+        {{ form.valid_to }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label d-block">Categories</label>
+
+        {% for checkbox in form.categories %}
+        <div class="form-check form-check-inline">
+          {{ checkbox.tag }}
+          <label class="form-check-label"> {{ checkbox.choice_label }} </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="form-check mb-3">
+        {{ form.active }}
+        <label for="{{ form.active.id_for_label }}" class="form-check-label">
+          Active
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  flatpickr("#id_valid_from", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+  });
+  flatpickr("#id_valid_to", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+  });
+</script>
+
+{% endblock %}
+

@@ -1,0 +1,87 @@
+﻿{% extends "shops/base.html" %}
+{% block title %}Sửa danh mục | QShop{% endblock %}
+
+{% block content %}
+<style>
+:root{
+  --bg:#f5f7fb;
+  --card:#ffffff;
+  --text:#212529;
+  --muted:#6c757d;
+  --border:#e5e7eb;
+}
+
+
+.card{
+  background:var(--card);
+  color:var(--text);
+  border-radius:14px;
+  border:1px solid var(--border);
+}
+
+.form-label{
+  font-weight:600;
+}
+
+input.form-control{
+  background:var(--card);
+  color:var(--text);
+  border:1px solid var(--border);
+}
+
+input.form-control:focus{
+  border-color:#0d6efd;
+  box-shadow:0 0 0 .15rem rgba(13,110,253,.15);
+}
+</style>
+
+<div class="container my-4" style="max-width:520px">
+
+  <!-- HEADER -->
+  <div class="mb-3">
+    <h4 class="mb-1">✏️ Sửa danh mục</h4>
+    <div class="text small">
+      Chỉnh sửa thông tin danh mục sản phẩm
+    </div>
+  </div>
+
+  <!-- FORM -->
+  <div class="card shadow-sm p-4">
+
+    <form method="post">
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label class="form-label">Tên danh mục</label>
+        <input
+          type="text"
+          name="name"
+          value="{{ category.name }}"
+          class="form-control"
+          placeholder="Nhập tên danh mục…"
+          required
+        >
+      </div>
+
+      <hr class="my-4">
+
+      <div class="d-flex justify-content-between">
+        <a
+          href="{% url 'shops:category_manage' %}"
+          class="btn btn-outline-secondary"
+        >
+          ⬅ Quay lại
+        </a>
+
+        <button class="btn btn-primary px-4">
+          💾 Lưu thay đổi
+        </button>
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+{% endblock %}
+

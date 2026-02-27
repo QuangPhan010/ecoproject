@@ -1,0 +1,89 @@
+.order-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+
+.order-header {
+    cursor: pointer;
+}
+
+.order-meta span {
+    display: block;
+    font-size: 0.9rem;
+}
+
+/* ===== STATUS BADGE ===== */
+.badge-status {
+    font-size: 0.75rem;
+    padding: 6px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+.badge-pending {
+    background: #6c757d;
+}
+
+.badge-processing {
+    background: #0d6efd;
+}
+
+.badge-shipped {
+    background: #198754;
+}
+
+.badge-delivered {
+    background: #20c997;
+}
+
+.badge-cancelled {
+    background: #dc3545;
+}
+
+/* ===== TIMELINE ===== */
+.order-timeline {
+    display: flex;
+    justify-content: space-between;
+    margin: 20px 0;
+    position: relative;
+}
+
+.order-timeline::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--border);
+}
+
+.timeline-step {
+    width: 25%;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+.timeline-dot {
+    width: 14px;
+    height: 14px;
+    background: #adb5bd;
+    border-radius: 50%;
+    margin: 0 auto 6px;
+}
+
+.timeline-label {
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
+
+.timeline-active .timeline-dot {
+    background: #0d6efd;
+}
+
+.timeline-active .timeline-label {
+    font-weight: 600;
+    opacity: 1;
+}

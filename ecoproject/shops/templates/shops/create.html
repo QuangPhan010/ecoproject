@@ -1,0 +1,217 @@
+﻿{% extends "shops/base.html" %}
+{% block content %}
+
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #212529;
+    --muted: #6c757d;
+    --border: #e5e7eb;
+  }
+
+
+  body {
+    background: var(--bg);
+  }
+
+  .card {
+    background: var(--card);
+    color: var(--text);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+
+  .form-label {
+    font-weight: 600;
+  }
+
+  input,
+  textarea,
+  select {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    border-color: #0d6efd !important;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.15) !important;
+  }
+
+  .section-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    border-left: 4px solid #0d6efd;
+    padding-left: 10px;
+  }
+
+  .preview-img {
+    width: 100%;
+    height: 260px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .btn-save {
+    padding: 10px;
+    font-weight: 600;
+  }
+
+  small.text-muted {
+    font-size: 13px;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="card shadow-sm p-4">
+        <h4 class="mb-4">🛒 Thêm sản phẩm mới</h4>
+
+        <form method="post">
+          {% csrf_token %}
+
+          <div class="row g-4">
+            <!-- LEFT -->
+            <div class="col-md-4">
+              <div class="section-title">Hình ảnh sản phẩm</div>
+
+              <div class="preview-img mb-2">Xem trước hình ảnh</div>
+
+              {{ form.image }}
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-md-8">
+              <div class="section-title">Thông tin cơ bản</div>
+
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Tên sản phẩm</label>
+                  {{ form.name }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Slug</label>
+                  {{ form.slug }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Giá bán</label>
+                  {{ form.price }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Giá cũ</label>
+                  {{ form.old_price }}
+                </div>
+
+                <!-- CATEGORY -->
+                <div class="col-md-6">
+                  <label class="form-label">Danh mục</label>
+                  <select name="category" class="form-select">
+                    <option value="">-- Chọn danh mục --</option>
+                    {% for c in categories %}
+                      <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+
+              <div class="section-title mt-4">Kho hàng</div>
+
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Tồn kho</label>
+                  {{ form.stock }}
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Trạng thái</label>
+                  {{ form.available }}
+                </div>
+              </div>
+
+              <div class="section-title mt-4">Mô tả sản phẩm</div>
+              {{ form.description }}
+
+              <!-- OPTIONS -->
+              <div class="section-title mt-4">Phiên bản sản phẩm</div>
+
+              <input
+                type="text"
+                name="options_raw"
+                class="form-control mb-2"
+                placeholder="VD: 128GB, 256GB, 512GB"
+              />
+
+              <small class="text-muted">
+                Nhập các phiên bản, phân cách bằng dấu phẩy (,)
+              </small>
+
+              <!-- COLORS -->
+              <div class="section-title mt-4">Màu sắc sản phẩm</div>
+
+              <input
+                type="text"
+                name="colors_raw"
+                class="form-control mb-2"
+                placeholder="VD: Đen, Trắng, Xanh dương, Navy"
+              />
+
+              <small class="text-muted">
+                Nhập tên màu, phân cách bằng dấu phẩy. Hệ thống tự chuyển sang mã màu.
+              </small>
+            </div>
+          </div>
+
+          <hr class="my-4" />
+
+          <div class="d-flex justify-content-end gap-2">
+            <a href="{% url 'shops:product' %}" class="btn btn-outline-secondary">
+              Hủy
+            </a>
+            <button type="submit" class="btn btn-primary btn-save">
+              💾 Lưu sản phẩm
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AUTO SLUG SCRIPT -->
+<script>
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  const nameInput = document.getElementById("id_name");
+  const slugInput = document.getElementById("id_slug");
+
+  if (nameInput && slugInput) {
+    nameInput.addEventListener("input", function () {
+      slugInput.value = slugify(this.value);
+    });
+  }
+</script>
+
+{% endblock %}
+

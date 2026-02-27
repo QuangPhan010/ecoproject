@@ -1,0 +1,65 @@
+﻿.checkout-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+
+.checkout-img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+
+/* TABLE FIX */
+.table {
+    color: var(--text);
+}
+
+.table thead th {
+    background: rgba(13, 110, 253, 0.08);
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+}
+
+
+.table td {
+    border-color: var(--border);
+    background: transparent;
+}
+
+/* INPUT */
+.form-control {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border);
+    width: 100%;
+}
+
+.form-control::placeholder {
+    color: var(--muted);
+}
+
+.form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.15);
+}
+
+/* SECTION */
+.section-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    border-left: 4px solid #0d6efd;
+    padding-left: 10px;
+}
+
+/* TOTAL */
+.checkout-total {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+/* DARK SHADOW */
+
+

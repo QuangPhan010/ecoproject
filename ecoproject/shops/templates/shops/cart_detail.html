@@ -1,0 +1,153 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+{% block title %}Giỏ hàng | QShop{% endblock %}
+
+{% block content %}
+<style>
+.cart-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+}
+
+.cart-img{
+  width:60px;
+  height:60px;
+  object-fit:cover;
+  border-radius:10px;
+  border:1px solid var(--border);
+}
+
+.qty-input{
+  width:70px;
+  text-align:center;
+}
+
+.cart-total{
+  font-size:1.3rem;
+  font-weight:700;
+}
+
+.table th{
+  border-bottom:2px solid var(--border);
+}
+
+.table td{
+  vertical-align:middle;
+}
+
+.empty-cart{
+  padding:60px 20px;
+  text-align:center;
+  opacity:.8;
+}
+</style>
+
+<div class="container mt-4 mb-5">
+
+  <h4 class="mb-4">
+    <i class="bi bi-cart3 me-1"></i> Giỏ hàng của bạn
+  </h4>
+
+  {% if not cart %}
+    <!-- EMPTY CART -->
+    <div class="card cart-card empty-cart">
+      <div class="fs-1 mb-2">🛒</div>
+      <h5>Giỏ hàng đang trống</h5>
+      <p class="text-muted">Hãy thêm sản phẩm để tiếp tục mua sắm</p>
+      <a href="{% url 'shops:product' %}" class="btn btn-primary mt-2">
+        Tiếp tục mua sắm
+      </a>
+    </div>
+
+  {% else %}
+    <!-- CART TABLE -->
+    <div class="card cart-card p-3 shadow-sm">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Sản phẩm</th>
+              <th class="text-center">Số lượng</th>
+              <th class="text-end">Giá</th>
+              <th class="text-end">Tạm tính</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+
+            {% for item_id, item in cart.items %}
+            <tr>
+              <td>
+                <div class="d-flex align-items-center gap-3">
+                  <img src="{{ item.image }}" class="cart-img">
+                  <div>
+                    <div class="fw-semibold">{{ item.name }}</div>
+                  </div>
+                </div>
+              </td>
+
+              <td class="text-center">
+                <form
+                  action="{% url 'shops:update_cart' item_id %}"
+                  method="post"
+                  class="d-flex justify-content-center gap-1"
+                >
+                  {% csrf_token %}
+                  <input
+                    type="number"
+                    name="quantity"
+                    value="{{ item.quantity }}"
+                    min="1"
+                    class="form-control form-control-sm qty-input"
+                  >
+                  <button class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-arrow-repeat"></i>
+                  </button>
+                </form>
+              </td>
+
+              <td class="text-end">
+                {{ item.price|intcomma }}₫
+              </td>
+
+              <td class="text-end fw-semibold">
+                {{ item.total|intcomma }}₫
+              </td>
+
+              <td class="text-end">
+                <a
+                  href="{% url 'shops:remove_from_cart' item_id %}"
+                  class="btn btn-sm btn-outline-danger"
+                  title="Xóa"
+                >
+                  <i class="bi bi-trash"></i>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TOTAL -->
+    <div class="d-flex justify-content-between align-items-center mt-4">
+      <a href="{% url 'shops:product' %}" class="btn btn-outline-secondary">
+        ← Tiếp tục mua sắm
+      </a>
+
+      <div class="text-end">
+        <div class="cart-total">
+          Tổng cộng: {{ total_price|intcomma }}₫
+        </div>
+        <a href="{% url 'shops:checkout' %}" class="btn btn-success mt-2 px-4">
+          <i class="bi bi-credit-card me-1"></i> Thanh toán
+        </a>
+      </div>
+    </div>
+
+  {% endif %}
+</div>
+{% endblock %}

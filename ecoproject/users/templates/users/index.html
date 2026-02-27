@@ -1,0 +1,87 @@
+﻿{% extends "users/base.html" %}
+{% block title %}Trang chủ | QShop{% endblock %}
+
+{% block content %}
+<style>
+.welcome-box{
+  border-radius:18px;
+  padding:32px;
+  background:#ffffff;
+  box-shadow:0 10px 30px rgba(0,0,0,.12);
+}
+
+.feature-card{
+  border-radius:14px;
+  padding:20px;
+  text-align:center;
+  transition:.3s;
+}
+.feature-card:hover{
+  transform:translateY(-4px);
+  box-shadow:0 8px 20px rgba(0,0,0,.15);
+}
+
+.feature-icon{
+  font-size:36px;
+  color:#4f46e5;
+}
+</style>
+
+<div class="container mt-4 mb-5">
+
+  <!-- WELCOME -->
+  <div class="welcome-box mb-4 text-center">
+    <h3 class="mb-2">👋 Xin chào {{ request.user.first_name|default:request.user.username }}!</h3>
+    <p class="text-muted">
+      Chào mừng bạn đến với <strong>QShop</strong> – nền tảng mua sắm trực tuyến nhanh chóng, an toàn và tiện lợi.
+    </p>
+
+    <a href="{% url 'shops:index' %}" class="btn btn-primary mt-2">
+      <i class="bi bi-bag"></i> Bắt đầu mua sắm
+    </a>
+  </div>
+
+  <!-- FEATURES -->
+  <div class="row g-3">
+
+    <div class="col-md-3 col-sm-6">
+      <div class="feature-card card">
+        <div class="feature-icon mb-2"><i class="bi bi-shop"></i></div>
+        <h6>Sản phẩm</h6>
+        <p class="small text-muted">Xem hàng ngàn sản phẩm mới nhất</p>
+        <a href="{% url 'shops:index' %}" class="btn btn-sm btn-outline-primary">Xem</a>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="feature-card card">
+        <div class="feature-icon mb-2"><i class="bi bi-cart3"></i></div>
+        <h6>Giỏ hàng</h6>
+        <p class="small text-muted">Quản lý sản phẩm bạn đã chọn</p>
+        <a href="#" class="btn btn-sm btn-outline-primary">Mở</a>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="feature-card card">
+        <div class="feature-icon mb-2"><i class="bi bi-receipt"></i></div>
+        <h6>Đơn hàng</h6>
+        <p class="small text-muted">Theo dõi tình trạng đơn hàng</p>
+        <a href="#" class="btn btn-sm btn-outline-primary">Xem</a>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="feature-card card">
+        <div class="feature-icon mb-2"><i class="bi bi-person"></i></div>
+        <h6>Tài khoản</h6>
+        <p class="small text-muted">Cập nhật thông tin cá nhân</p>
+        <a href="{% url 'users:profile' %}" class="btn btn-sm btn-outline-primary">Mở</a>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+

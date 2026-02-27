@@ -1,0 +1,23 @@
+{% extends "shops/base.html" %}
+{% block title %}Xóa coupon{% endblock %}
+
+{% block content %}
+<div class="container my-5" style="max-width:500px">
+
+  <div class="card p-4 text-center shadow-sm">
+    <h5 class="mb-3 text-danger">⚠️ Xác nhận xóa</h5>
+
+    <p>Bạn có chắc muốn xóa coupon:</p>
+    <strong class="fs-5">{{ object.code }}</strong>
+
+    <form method="post" class="mt-4">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">🗑 Xóa</button>
+      <a href="{% url 'shops:coupon_stats' %}" class="btn btn-secondary ms-2">
+        Hủy
+      </a>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

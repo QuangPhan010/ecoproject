@@ -1,0 +1,141 @@
+{% extends "shops/base.html" %} {% load static %} {% block title %}Tạo mã giảm
+giá | QShop{% endblock %} {% block content %}
+
+<!-- Flatpickr CSS -->
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
+/>
+
+<style>
+  .coupon-card {
+    max-width: 650px;
+    margin: auto;
+    border-radius: 14px;
+  }
+
+  .form-label {
+    font-weight: 500;
+  }
+
+  .required::after {
+    content: " *";
+    color: red;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="card coupon-card shadow-sm">
+    <div class="card-body">
+      <h4 class="mb-4">🎟️ Tạo mã giảm giá</h4>
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+
+        <!-- CODE -->
+        <div class="mb-3">
+          <label class="form-label required"> Mã coupon </label>
+
+          {{ form.code }} {% if form.code.errors %}
+          <div class="text-danger small">{{ form.code.errors }}</div>
+          {% endif %}
+        </div>
+
+        <!-- DISCOUNT -->
+        <div class="mb-3">
+          <label class="form-label required"> Phần trăm giảm (%) </label>
+
+          {{ form.discount }}
+        </div>
+
+        <!-- MAX DISCOUNT -->
+        <div class="mb-3">
+          <label class="form-label"> Giảm tối đa (₫) </label>
+
+          {{ form.max_discount }}
+        </div>
+
+        <!-- USAGE LIMIT -->
+        <div class="mb-3">
+          <label class="form-label"> Giới hạn số lần sử dụng </label>
+
+          {{ form.usage_limit }}
+        </div>
+
+        <!-- VALID FROM -->
+        <div class="mb-3">
+          <label class="form-label required"> Ngày bắt đầu </label>
+
+          {{ form.valid_from }}
+        </div>
+
+        <!-- VALID TO -->
+        <div class="mb-3">
+          <label class="form-label required"> Ngày kết thúc </label>
+
+          {{ form.valid_to }}
+        </div>
+
+        <!-- CATEGORIES -->
+        <div class="mb-3">
+          <label class="form-label">Áp dụng cho danh mục</label>
+          <div class="row">
+            {% for choice in form.categories %}
+            <div class="col-md-6">
+                <div class="form-check">
+                    {{ choice.tag }}
+                    <label class="form-check-label" for="{{ choice.id_for_label }}">
+                        {{ choice.choice_label }}
+                    </label>
+                </div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="form-text">Để trống nếu áp dụng cho tất cả sản phẩm.</div>
+        </div>
+
+        <!-- ACTIVE -->
+        <div class="form-check mb-3">
+          {{ form.active }}
+
+          <label class="form-check-label"> Kích hoạt coupon </label>
+        </div>
+
+        <!-- BUTTON -->
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary">✅ Tạo mã</button>
+
+          <a
+            href="{% url 'shops:coupon_stats' %}"
+            class="btn btn-outline-secondary"
+          >
+            Hủy
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Flatpickr JS -->
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+<script>
+  flatpickr("#id_valid_from", {
+    enableTime: true,
+
+    dateFormat: "Y-m-d H:i",
+
+    minDate: "today",
+  });
+
+  flatpickr("#id_valid_to", {
+    enableTime: true,
+
+    dateFormat: "Y-m-d H:i",
+
+    minDate: "today",
+  });
+</script>
+
+{% endblock %}

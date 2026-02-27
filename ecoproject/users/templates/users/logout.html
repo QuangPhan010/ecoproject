@@ -1,0 +1,59 @@
+﻿{% extends "users/base.html" %}
+{% block title %}Đã đăng xuất | QShop{% endblock %}
+
+{% block content %}
+<style>
+.logout-card {
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+  transition: 0.3s;
+}
+
+
+.logout-icon {
+  font-size: 52px;
+  color: #22c55e;
+}
+
+.logout-btn {
+  min-width: 160px;
+}
+</style>
+
+<div class="container">
+  <div class="row justify-content-center align-items-center" style="min-height:75vh;">
+    <div class="col-md-8 col-lg-6">
+
+      <div class="card logout-card text-center">
+        <div class="card-body p-4 p-md-5">
+
+          <div class="logout-icon mb-3">
+            <i class="bi bi-check-circle-fill"></i>
+          </div>
+
+          <h3 class="mb-2">Đăng xuất thành công</h3>
+
+          <p class="text-muted mb-4">
+            Bạn đã đăng xuất khỏi <strong>QShop</strong>. Hẹn gặp lại bạn sớm!
+          </p>
+
+          <div class="d-flex justify-content-center gap-3 flex-wrap">
+
+            <a href="{% url 'users:login' %}" class="btn btn-primary logout-btn">
+              <i class="bi bi-box-arrow-in-right me-1"></i> Đăng nhập lại
+            </a>
+
+            <a href="{% url 'users:index' %}" class="btn btn-outline-secondary logout-btn">
+              <i class="bi bi-house me-1"></i> Về trang chủ
+            </a>
+
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+

@@ -1,0 +1,207 @@
+{% extends "users/base.html" %} {% block title %}Tài khoản của tôi | QShop{% endblock %} {% load humanize %} {% block content %}
+<style>
+  .profile-card {
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    background: #fff;
+    transition: 0.3s;
+  }
+
+  
+
+  .avatar {
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 4px solid #4f46e5;
+  }
+
+  .stat-box {
+    border-radius: 12px;
+    padding: 14px;
+    background: #f5f7fb;
+    text-align: center;
+  }
+
+  
+
+  .stat-box strong {
+    font-size: 18px;
+  }
+
+  .section-title {
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .rank-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  }
+  .rank-icon {
+    font-size: 18px;
+  }
+  .progress {
+    height: 10px;
+    border-radius: 999px;
+  }
+
+  .progress-bar {
+    background: linear-gradient(45deg, #6366f1, #60a5fa);
+  }
+
+  @keyframes rankGlow {
+    from {
+      box-shadow: 0 0 5px rgba(255, 255, 255, 0.3);
+    }
+
+    to {
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+    }
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="card profile-card p-4">
+        <!-- HEADER -->
+        <div class="d-flex align-items-center gap-4 flex-wrap">
+          {% if request.user.profile.photo %}
+          <img src="{{ request.user.profile.photo.url }}" class="avatar" />
+          {% else %}
+          <img
+            src="https://i.pravatar.cc/300?u={{ request.user.id }}"
+            class="avatar"
+          />
+          {% endif %}
+
+          <div class="flex-grow-1">
+            <h4 class="mb-1">{{ request.user.username }}</h4>
+
+            <div class="text-muted">{{ request.user.email }}</div>
+
+            <!-- RANK -->
+            <div
+              class="rank-badge"
+              style="
+        background: {{ request.user.profile.get_rank_color }};
+        animation: rankGlow 2s infinite alternate;
+     "
+            >
+              <span class="rank-icon">
+                {{ request.user.profile.get_rank_icon }}
+              </span>
+
+              {{ request.user.profile.rank }}
+            </div>
+
+            <div class="text-muted mt-1">
+              Điểm hiện tại:
+              <strong>{{ points|intcomma }}</strong>
+            </div>
+
+            {% if rank_info %}
+
+            <div class="mt-2">
+              <small class="text-muted">
+                Bạn cần thêm
+                <strong>{{ rank_info.needed_points|intcomma }}</strong>
+                điểm để lên
+                <strong>{{ rank_info.next_rank }}</strong>
+              </small>
+
+              <div class="progress mt-1">
+                <div
+                  class="progress-bar"
+                  style="width: {{ rank_info.progress }}%"
+                ></div>
+              </div>
+            </div>
+
+            {% else %}
+
+            <div class="mt-2 text-success">Bạn đã đạt rank cao nhất 🎉</div>
+
+            {% endif %}
+
+            <!-- BUTTONS -->
+
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+              <a href="{% url 'users:edit' %}" class="btn btn-primary btn-sm">
+                Chỉnh sửa hồ sơ
+              </a>
+
+              <a href="#" class="btn btn-outline-secondary btn-sm">
+                Địa chỉ giao hàng
+              </a>
+
+              <a
+                href="{% url 'users:password_change' %}"
+                class="btn btn-outline-secondary btn-sm"
+              >
+                Đổi mật khẩu
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-4" />
+
+        <!-- STATS -->
+
+        <div class="row g-3 text-center mb-4">
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ total_orders }}</strong><br />
+              <small class="text-muted">Đơn hàng</small>
+            </div>
+          </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ shipping_orders }}</strong><br />
+              <small class="text-muted">Đang giao</small>
+            </div>
+          </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ total_spent|intcomma }}₫</strong><br />
+              <small class="text-muted">Đã chi</small>
+            </div>
+          </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ request.user.profile.points|intcomma }}</strong><br />
+              <small class="text-muted">Điểm</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const currentRank = "{{ request.user.profile.rank }}";
+
+  const savedRank = localStorage.getItem("lastRank");
+
+  if (savedRank && savedRank !== currentRank) {
+    alert("🎉 Bạn đã lên rank " + currentRank);
+  }
+
+  localStorage.setItem("lastRank", currentRank);
+</script>
+
+{% endblock %}

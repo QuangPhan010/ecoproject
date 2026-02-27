@@ -1,0 +1,249 @@
+{% extends "shops/base.html" %} {% load static %} {% load humanize %} {% block title %} {{ product.name }} | QShop{% endblock %} {% block content %}
+<link rel="stylesheet" href="{% static 'css/detail.css' %}" />
+
+<div class="container mt-4 mb-5">
+  <div class="product-box">
+    <div class="row g-4">
+      <div class="col-md-5">
+        <div class="image-wrapper">
+          <img src="{{ product.image }}" class="product-img" />
+
+          <div class="img-actions">
+            <button title="Yêu thích">❤️</button>
+            <button onclick="scrollToSection('reviews')" title="Đánh giá">
+              ⭐
+            </button>
+            <button title="So sánh">⚖️</button>
+            <button onclick="scrollToSection('description')" title="Mô tả">
+              📄
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-7">
+        <h3>{{ product.name }}</h3>
+
+        <div class="mb-2">
+          <span class="price">{{ product.price|intcomma }}₫</span>
+          {% if product.old_price %}
+          <span class="old-price ms-2">{{ product.old_price|intcomma }}₫</span>
+          {% endif %}
+        </div>
+
+        {% if product.options.exists %}
+        <div class="mb-3">
+          <label>Phiên bản:</label>
+          <select class="form-select w-50">
+            {% for opt in product.options.all %}
+            <option value="{{ opt.id }}">{{ opt.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %} {% if product.colors.count > 0 %}
+        <div class="mb-3">
+          <label>Màu sắc:</label>
+          <div class="d-flex gap-2 mt-1">
+            {% for color in product.colors.all %}
+            <span
+              class="color-dot"
+              style="background:{{ color.code }}"
+              title="{{ color.name }}"
+            ></span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %} {% if product.stock > 0 %}
+        <p class="text-success fw-semibold mb-2">
+          Còn {{ product.stock }} sản phẩm
+        </p>
+        {% else %}
+        <p class="text-danger fw-semibold mb-2">Đã hết hàng</p>
+        {% endif %}
+
+        <div class="d-flex gap-2 mb-4">
+          <button class="btn btn-danger">⚡ Mua ngay</button>
+          {% if product.stock > 0 %}
+          <button
+            class="btn btn-outline-primary js-add-to-cart"
+            data-url="{% url 'shops:add_to_cart' product.id %}"
+          >
+            🛒 Thêm vào giỏ
+          </button>
+          {% else %}
+          <button class="btn btn-secondary" disabled>🚫 Đã hết hàng</button>
+          {% endif %}
+        </div>
+
+        <div class="viewed-box">
+          <h6>👀 Sản phẩm đã xem</h6>
+
+          <div class="d-flex gap-2 flex-wrap">
+            {% for p in viewed_products %} {% if p.id != product.id %}
+            <a href="{% url 'shops:detail' p.slug %}" title="{{ p.name }}">
+              <img src="{{ p.image }}" />
+            </a>
+            {% endif %} {% empty %}
+            <small class="text-muted">Chưa có sản phẩm nào</small>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="description" class="product-box mt-4">
+    <h4>📄 Mô tả sản phẩm</h4>
+    <div class="product-desc mt-2">{{ product.description|linebreaksbr }}</div>
+  </div>
+
+  <div id="reviews" class="product-box mt-4">
+    <!-- SUMMARY -->
+    <div class="review-summary">
+      <div class="review-score">{{ avg_rating }}</div>
+      <div>
+        <div class="star">
+          {% for i in "12345" %} {% if forloop.counter <= avg_rating|floatformat:0 %} ★ {% else %} ☆ {% endif %} {% endfor %}
+        </div>
+        <small class="text-muted">{{ rating_count }} đánh giá</small>
+      </div>
+    </div>
+
+    <!-- FORM -->
+    {% if user.is_authenticated %} {% if not user_review %}
+    <form
+      id="review-form"
+      class="mb-4"
+      data-add-url="{% url 'shops:add_review' product.slug %}"
+    >
+      {% csrf_token %}
+      <div class="rating-input mb-2">
+        <input type="hidden" name="rating" id="rating-value" value="5" />
+        <span class="star-input" data-value="1">★</span>
+        <span class="star-input" data-value="2">★</span>
+        <span class="star-input" data-value="3">★</span>
+        <span class="star-input" data-value="4">★</span>
+        <span class="star-input" data-value="5">★</span>
+      </div>
+      <textarea
+        name="content"
+        class="form-control"
+        rows="3"
+        placeholder="Chia sẻ trải nghiệm của bạn..."
+      ></textarea>
+      <button class="btn btn-danger mt-2">Gửi đánh giá</button>
+    </form>
+    {% else %}
+    <p class="text-muted">Cảm ơn bạn đã đánh giá sản phẩm này.</p>
+    {% endif %} {% else %}
+    <p class="text-muted">🔒 Vui lòng đăng nhập để đánh giá</p>
+    {% endif %}
+
+    <div id="review-list" data-react-url="{% url 'shops:review_react' %}">
+      {% for review in reviews %}
+      <div class="review-card" id="review-{{ review.id }}">
+        <strong>{{ review.user.username }}</strong>
+        {% if review.user == user %}
+        <div class="float-end">
+          <button
+            class="btn btn-sm btn-outline-secondary js-edit-review"
+            data-url="{% url 'shops:edit_review' review.id %}"
+            data-rating="{{ review.rating }}"
+            data-content="{{ review.content|escapejs }}"
+          >
+            ✏️
+          </button>
+
+          <button
+            class="btn btn-sm btn-outline-danger"
+            onclick="deleteReview('{% url 'shops:delete_review' review.id %}')"
+          >
+            🗑
+          </button>
+        </div>
+        {% endif %}
+
+        <span class="star">
+          {% for i in "12345" %} {% if forloop.counter <= review.rating %} ★ {%
+          else %} ☆ {% endif %} {% endfor %}
+        </span>
+
+        <p class="mb-1 review-content">{{ review.content }}</p>
+        <small class="text-muted"
+          >{{ review.created_at|date:"d/m/Y H:i" }}</small
+        >
+
+        <div class="mt-2 d-flex gap-3">
+          <button
+            class="react-btn js-react-btn"
+            data-review-id="{{ review.id }}"
+            data-is-like="true"
+          >
+            👍 <span class="likes-count">{{ review.likes_count }}</span>
+          </button>
+          <button
+            class="react-btn js-react-btn"
+            data-review-id="{{ review.id }}"
+            data-is-like="false"
+          >
+            👎 <span class="dislikes-count">{{ review.dislikes_count }}</span>
+          </button>
+        </div>
+
+        <!-- REPLIES -->
+        {% for reply in review.replies.all %}
+        <div class="reply">
+          <strong>{{ reply.user.username }}</strong>: {{ reply.content }}
+        </div>
+        {% endfor %} {% if user.is_authenticated %}
+        <form
+          class="reply-form mt-2"
+          data-parent="{{ review.id }}"
+          data-add-url="{% url 'shops:add_review' product.slug %}"
+        >
+          {% csrf_token %}
+          <textarea
+            class="form-control"
+            rows="2"
+            placeholder="Trả lời đánh giá..."
+          ></textarea>
+          <button class="btn btn-sm btn-outline-secondary mt-1">Trả lời</button>
+        </form>
+        {% endif %}
+      </div>
+      {% empty %}
+      <p class="text-muted">Chưa có đánh giá nào.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="product-box mt-4">
+    <h4>🛍️ Có thể bạn thích</h4>
+
+    <div class="suggest-container">
+      <div class="suggest-wrapper">
+        {% for p in suggest_products %}
+
+        <div class="suggest-card">
+          <a href="{% url 'shops:detail' p.slug %}">
+            <img src="{{ p.image }}" class="suggest-card-img" />
+
+            <div class="suggest-card-body">
+              <div class="suggest-card-title">
+                {{ p.name|truncatechars:30 }}
+              </div>
+
+              <div class="suggest-card-price">{{ p.price|intcomma }}₫</div>
+            </div>
+          </a>
+        </div>
+
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/detail.js' %}" type="module"></script>
+
+{% endblock %}
