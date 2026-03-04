@@ -850,7 +850,6 @@ def order_history(request):
             order.qr_shipper_url = f"{base_url}{path}"
         else:
             order.qr_shipper_url = request.build_absolute_uri(path)
-        order.qr_shipper_data_uri = _build_qr_svg_data_uri(order.qr_shipper_url)
 
     export_query = ""
     if is_admin:

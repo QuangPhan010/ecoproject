@@ -181,21 +181,11 @@
                 {{ order.get_payment_method_display }}
               </span>
               <div class="mt-2 text-end">
-                {% if order.qr_shipper_data_uri %}
-                <img
-                  src="{{ order.qr_shipper_data_uri }}"
-                  alt="QR đơn hàng"
-                  width="100"
-                  height="100"
-                  class="border rounded bg-white p-1"
-                />
-                {% else %}
                 <a href="{{ order.qr_shipper_url }}"
                    class="btn btn-sm btn-outline-secondary"
                    target="_blank">
                   Mở QR chi tiết đơn
                 </a>
-                {% endif %}
 
                 <div class="small text-muted mt-1">
                   Quét QR xem chi tiết đơn
