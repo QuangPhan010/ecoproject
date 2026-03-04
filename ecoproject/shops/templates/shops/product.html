@@ -88,7 +88,7 @@
 
         <div class="category-list d-grid gap-1">
           <a
-            href="{% url 'shops:product' %}"
+            href="{% url 'shops:product' %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}{% if current_sort %}sort={{ current_sort|urlencode }}{% endif %}"
             class="{% if not current_category %}active{% endif %}"
           >
             🛒 Tất cả
@@ -96,7 +96,7 @@
 
           {% for c in categories %}
           <a
-            href="?category={{ c.slug }}"
+            href="{% url 'shops:product' %}?category={{ c.slug|urlencode }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if current_sort %}&sort={{ current_sort|urlencode }}{% endif %}"
             class="{% if current_category == c.slug %}active{% endif %}"
           >
             {{ c.name }}
@@ -114,6 +114,37 @@
         Create new product
       </a>
       {% endif %}
+
+      <form method="get" class="row g-2 align-items-end mb-3">
+        {% if current_category %}
+        <input type="hidden" name="category" value="{{ current_category }}">
+        {% endif %}
+
+        <div class="col-md-7">
+          <label class="form-label mb-1">Tìm kiếm</label>
+          <input
+            type="text"
+            name="q"
+            value="{{ search_query }}"
+            class="form-control"
+            placeholder="Nhập tên sản phẩm..."
+          >
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label mb-1">Sắp xếp</label>
+          <select name="sort" class="form-select">
+            <option value="newest" {% if current_sort == "newest" %}selected{% endif %}>Mới nhất</option>
+            <option value="price_asc" {% if current_sort == "price_asc" %}selected{% endif %}>Giá tăng dần</option>
+            <option value="price_desc" {% if current_sort == "price_desc" %}selected{% endif %}>Giá giảm dần</option>
+            <option value="best_selling" {% if current_sort == "best_selling" %}selected{% endif %}>Bán chạy</option>
+          </select>
+        </div>
+
+        <div class="col-md-2 d-grid">
+          <button class="btn btn-outline-primary">Áp dụng</button>
+        </div>
+      </form>
 
       <div class="row g-4">
 
@@ -182,6 +213,38 @@
         {% endfor %}
 
       </div>
+
+      {% if page_obj and page_obj.paginator.num_pages > 1 %}
+      <nav class="mt-4">
+        <ul class="pagination justify-content-center">
+          {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?{% if base_query %}{{ base_query }}&{% endif %}page={{ page_obj.previous_page_number }}">
+              Trước
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled"><span class="page-link">Trước</span></li>
+          {% endif %}
+
+          <li class="page-item disabled">
+            <span class="page-link">
+              Trang {{ page_obj.number }}/{{ page_obj.paginator.num_pages }}
+            </span>
+          </li>
+
+          {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?{% if base_query %}{{ base_query }}&{% endif %}page={{ page_obj.next_page_number }}">
+              Sau
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled"><span class="page-link">Sau</span></li>
+          {% endif %}
+        </ul>
+      </nav>
+      {% endif %}
     </div>
   </div>
 </div>

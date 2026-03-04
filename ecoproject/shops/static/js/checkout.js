@@ -1,47 +1,89 @@
 document.addEventListener("DOMContentLoaded", function () {
-
   const addressInput =
     document.querySelector("#id_address");
-
   const shippingEl =
     document.getElementById("shipping-cost");
-
   const totalEl =
     document.getElementById("total-price");
+  const distanceEl =
+    document.getElementById("shipping-distance");
+  const shippingLoadingEl =
+    document.getElementById("shipping-loading");
 
-  if (!addressInput) return;
+  if (!addressInput || !shippingEl || !totalEl) return;
 
   function format(v) {
     return v.toLocaleString("vi-VN") + "₫";
   }
 
-  async function updateSummary() {
+  function setLoading(isLoading) {
+    if (!shippingLoadingEl) return;
+    shippingLoadingEl.classList.toggle("d-none", !isLoading);
+  }
 
+  let debounceTimer = null;
+  let requestSeq = 0;
+
+  async function updateSummary() {
     const address =
       addressInput.value.trim();
 
-    if (address.length < 3)
+    if (address.length < 3) {
+      setLoading(false);
       return;
+    }
 
-    const res =
-      await fetch(
-        `/shops/api/checkout-summary/?address=${encodeURIComponent(address)}`
-      );
+    requestSeq += 1;
+    const currentSeq = requestSeq;
+    setLoading(true);
 
-    const data =
-      await res.json();
+    try {
+      const res =
+        await fetch(
+          `/shops/api/checkout-summary/?address=${encodeURIComponent(address)}`
+        );
 
-    shippingEl.textContent =
-      format(data.shipping_cost);
+      if (!res.ok) return;
 
-    totalEl.textContent =
-      format(data.final_total);
+      const data =
+        await res.json();
 
+      // Ignore stale responses when user types quickly.
+      if (currentSeq !== requestSeq) return;
+
+      shippingEl.textContent =
+        format(data.shipping_cost);
+
+      const distance =
+        Number(data.distance);
+
+      if (distanceEl) {
+        if (Number.isFinite(distance) && distance > 0) {
+          distanceEl.textContent = `(${distance.toFixed(2)} km)`;
+          distanceEl.classList.remove("d-none");
+        } else {
+          distanceEl.classList.add("d-none");
+        }
+      }
+
+      totalEl.textContent =
+        format(data.final_total);
+    } catch (_error) {
+      // Keep existing values if API is temporarily unavailable.
+    } finally {
+      if (currentSeq === requestSeq) {
+        setLoading(false);
+      }
+    }
+  }
+
+  function debouncedUpdateSummary() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(updateSummary, 450);
   }
 
   addressInput.addEventListener(
     "input",
-    updateSummary
+    debouncedUpdateSummary
   );
-
 });

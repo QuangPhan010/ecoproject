@@ -168,17 +168,6 @@
             </div>
 
 
-            <!-- CALCULATE SHIPPING -->
-            <button type="submit"
-                    name="action"
-                    value="calculate_shipping"
-                    class="btn btn-outline-primary">
-
-              <i class="bi bi-truck me-1"></i>
-              Tính phí ship
-
-            </button>
-
           </div>
 
         </div>
@@ -226,17 +215,20 @@
 
               <span>
                 Phí ship
-                {% if distance %}
-                <small class="text-muted">
+                <small id="shipping-distance"
+                       class="text-muted {% if not distance %}d-none{% endif %}">
                   ({{ distance|floatformat:2 }} km)
                 </small>
-                {% endif %}
               </span>
 
-              <span>
+              <span id="shipping-cost">
                 {{ shipping_cost|intcomma }}₫
               </span>
 
+            </div>
+            <div id="shipping-loading"
+                 class="shipping-loading text-muted small mb-2 d-none">
+              Đang tính phí ship...
             </div>
 
 
@@ -260,7 +252,7 @@
 
               <strong class="text-success">
 
-                {{ final_total|intcomma }}₫
+                <span id="total-price">{{ final_total|intcomma }}₫</span>
 
               </strong>
 
@@ -351,4 +343,8 @@
 
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/checkout.js' %}"></script>
 {% endblock %}

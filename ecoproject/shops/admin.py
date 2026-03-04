@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Product, FlashSale, ProductOption, ProductColor,
-    Order, OrderItem, Coupon
+    Order, OrderItem, Coupon, WishlistItem
 )
 
 # ================= PRODUCT =================
@@ -87,3 +87,10 @@ class CouponAdmin(admin.ModelAdmin):
     )
     list_filter = ('active',)
     search_fields = ('code',)
+
+
+@admin.register(WishlistItem)
+class WishlistItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "product", "created_at")
+    search_fields = ("user__username", "product__name")
+    list_filter = ("created_at",)

@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage
+from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem
 from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm
 from users.forms import ProfileEditForm
 from .color_map import COLOR_MAP
@@ -20,9 +20,12 @@ import os
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.views.decorators.http import require_POST
 from django.db import models
-from django.db.models import Count, Sum, F, ExpressionWrapper, IntegerField
+from django.db.models import Count, Sum, F, Q, ExpressionWrapper, IntegerField
+from django.core.paginator import Paginator
 from datetime import timedelta
 from io import BytesIO
+import base64
+import logging
 from .utils.shipping import calculate_shipping_cost
 from django.db.models.functions import TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
@@ -35,12 +38,41 @@ try:
     from reportlab.graphics.barcode import qr
     from reportlab.graphics.barcode import code128
     from reportlab.graphics import renderPDF
+    from reportlab.graphics import renderSVG
     from reportlab.graphics.shapes import Drawing
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 except Exception:
     A4 = None
     canvas = None
+    renderSVG = None
+
+logger = logging.getLogger(__name__)
+
+
+def _build_qr_svg_data_uri(value, size=120):
+    """Generate QR as inline SVG data URI to avoid third-party QR services."""
+    if not value or not renderSVG:
+        return ""
+
+    try:
+        widget = qr.QrCodeWidget(value)
+        bounds = widget.getBounds()
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+
+        drawing = Drawing(size, size, transform=[size / width, 0, 0, size / height, 0, 0])
+        drawing.add(widget)
+
+        svg_data = renderSVG.drawToString(drawing)
+        if isinstance(svg_data, str):
+            svg_data = svg_data.encode("utf-8")
+
+        encoded = base64.b64encode(svg_data).decode("ascii")
+        return f"data:image/svg+xml;base64,{encoded}"
+    except Exception:
+        logger.warning("Cannot build inline QR for value=%s", value, exc_info=True)
+        return ""
 
 
 # ================= HOME =================
@@ -65,19 +97,46 @@ def save(self, *args, **kwargs):
 # ================= PRODUCT LIST =================
 
 def product(request):
-    category_slug = request.GET.get("category")
+    category_slug = request.GET.get("category", "").strip()
+    search_query = request.GET.get("q", "").strip()
+    sort = request.GET.get("sort", "newest").strip()
 
-    products = Product.objects.filter(available=True).order_by('-id')
+    products = Product.objects.filter(available=True).select_related("category")
 
     if category_slug:
         products = products.filter(category__slug=category_slug)
 
+    if search_query:
+        products = products.filter(Q(name__icontains=search_query))
+
+    sort_map = {
+        "newest": ("-id",),
+        "price_asc": ("price", "id"),
+        "price_desc": ("-price", "-id"),
+        "best_selling": ("-sold", "-id"),
+    }
+    if sort not in sort_map:
+        sort = "newest"
+
+    products = products.order_by(*sort_map[sort])
+
+    paginator = Paginator(products, 12)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
+    base_query = query_params.urlencode()
+
     categories = Category.objects.all()
 
     return render(request, 'shops/product.html', {
-        'products': products,
+        'products': page_obj.object_list,
+        'page_obj': page_obj,
         'categories': categories,
-        'current_category': category_slug
+        'current_category': category_slug,
+        'search_query': search_query,
+        'current_sort': sort,
+        'base_query': base_query,
     })
 
 
@@ -105,6 +164,12 @@ def detail(request, slug):
     preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(viewed)])
     viewed_products = Product.objects.filter(id__in=viewed).order_by(preserved)
     suggest_products = Product.objects.exclude(id=product.id).order_by('?')[:6]
+    compare_ids = [int(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
+    is_in_compare = product.id in compare_ids
+
+    is_wishlisted = False
+    if request.user.is_authenticated:
+        is_wishlisted = WishlistItem.objects.filter(user=request.user, product=product).exists()
 
     return render(request, 'shops/detail.html', {
         'product': product,
@@ -115,6 +180,9 @@ def detail(request, slug):
         "avg_rating": avg_rating,
         "rating_count": rating_count,
         "user_review": user_review,
+        "is_wishlisted": is_wishlisted,
+        "is_in_compare": is_in_compare,
+        "compare_count": len(compare_ids),
     })
 
 @login_required
@@ -274,6 +342,119 @@ def update_cart(request, product_id):
         
     return redirect('shops:cart_detail')
 
+
+@require_POST
+def buy_now(request, product_id):
+    product = get_object_or_404(Product, id=product_id, available=True)
+
+    if product.stock <= 0:
+        messages.error(request, "Sản phẩm đã hết hàng.")
+        return redirect("shops:detail", slug=product.slug)
+
+    cart = request.session.get("cart", {})
+    product_id_str = str(product.id)
+
+    current_qty = cart.get(product_id_str, {}).get("quantity", 0)
+    if current_qty + 1 > product.stock:
+        messages.error(request, f"Chỉ còn {product.stock} sản phẩm.")
+        return redirect("shops:detail", slug=product.slug)
+
+    if product_id_str in cart:
+        cart[product_id_str]["quantity"] += 1
+    else:
+        cart[product_id_str] = {
+            "quantity": 1,
+            "price": product.price,
+            "name": product.name,
+            "image": product.image,
+        }
+
+    request.session["cart"] = cart
+    return redirect("shops:checkout")
+
+
+@login_required
+@require_POST
+def toggle_wishlist(request, product_id):
+    product = get_object_or_404(Product, id=product_id, available=True)
+    next_url = request.POST.get("next") or reverse("shops:detail", args=[product.slug])
+
+    item = WishlistItem.objects.filter(user=request.user, product=product).first()
+    if item:
+        item.delete()
+        messages.info(request, "Đã bỏ khỏi yêu thích.")
+    else:
+        WishlistItem.objects.create(user=request.user, product=product)
+        messages.success(request, "Đã thêm vào yêu thích.")
+
+    return redirect(next_url)
+
+
+@login_required
+def wishlist(request):
+    wishlist_items = (
+        WishlistItem.objects
+        .filter(user=request.user)
+        .select_related("product")
+    )
+    return render(request, "shops/wishlist.html", {"wishlist_items": wishlist_items})
+
+
+@require_POST
+def compare_add(request, product_id):
+    product = get_object_or_404(Product, id=product_id, available=True)
+    next_url = request.POST.get("next") or reverse("shops:detail", args=[product.slug])
+
+    compare_ids = [str(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
+    pid = str(product.id)
+
+    if pid in compare_ids:
+        messages.info(request, "Sản phẩm đã có trong danh sách so sánh.")
+        return redirect(next_url)
+
+    if len(compare_ids) >= 4:
+        messages.error(request, "Chỉ so sánh tối đa 4 sản phẩm.")
+        return redirect(next_url)
+
+    compare_ids.append(pid)
+    request.session["compare_products"] = compare_ids
+    messages.success(request, "Đã thêm vào danh sách so sánh.")
+    return redirect(next_url)
+
+
+@require_POST
+def compare_remove(request, product_id):
+    next_url = request.POST.get("next") or reverse("shops:compare")
+    compare_ids = [str(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
+    pid = str(product_id)
+    if pid in compare_ids:
+        compare_ids.remove(pid)
+        request.session["compare_products"] = compare_ids
+    return redirect(next_url)
+
+
+@require_POST
+def compare_clear(request):
+    next_url = request.POST.get("next") or reverse("shops:compare")
+    request.session["compare_products"] = []
+    return redirect(next_url)
+
+
+def compare(request):
+    compare_ids = [int(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
+    compare_ids = compare_ids[:4]
+
+    products = Product.objects.filter(id__in=compare_ids, available=True)
+    if compare_ids:
+        preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(compare_ids)])
+        products = products.order_by(preserved)
+
+    return render(request, "shops/compare.html", {
+        "products": products,
+        "compare_count": len(compare_ids),
+        "can_compare": products.count() >= 2,
+    })
+
 @login_required
 def checkout(request):
 
@@ -386,46 +567,53 @@ def checkout(request):
             # ===== PLACE ORDER =====
 
             if action == "place_order":
+                try:
+                    with transaction.atomic():
+                        product_ids = [int(pid) for pid in cart.keys()]
+                        products = Product.objects.filter(id__in=product_ids)
+                        product_map = {str(product.id): product for product in products}
 
-                order = Order.objects.create(
-                    user=request.user,
-                    address=address,
-                    phone=profile_form.cleaned_data["phone"],
-                    total_price=final_total,
-                    shipping_cost=shipping_cost,
-                    rank_discount=rank_discount,
-                    discount=coupon_discount,
-                    coupon=coupon,
-                    payment_method=selected_payment
-                )
+                        order = Order.objects.create(
+                            user=request.user,
+                            address=address,
+                            phone=profile_form.cleaned_data["phone"],
+                            total_price=final_total,
+                            shipping_cost=shipping_cost,
+                            rank_discount=rank_discount,
+                            discount=coupon_discount,
+                            coupon=coupon,
+                            payment_method=selected_payment
+                        )
 
-                # create order items
-                for product_id, item in cart.items():
+                        # create order items
+                        for product_id, item in cart.items():
+                            product = product_map.get(str(product_id))
+                            if not product:
+                                raise ValueError("Một số sản phẩm không còn tồn tại.")
 
-                    product = get_object_or_404(
-                        Product,
-                        id=product_id
-                    )
+                            qty = int(item["quantity"])
+                            if qty <= 0:
+                                raise ValueError("Số lượng sản phẩm không hợp lệ trong giỏ hàng.")
 
-                    OrderItem.objects.create(
-                        order=order,
-                        product=product,
-                        price=item["price"],
-                        quantity=item["quantity"]
-                    )
+                            OrderItem.objects.create(
+                                order=order,
+                                product=product,
+                                price=item["price"],
+                                quantity=qty
+                            )
 
-                    # giảm stock
-                    product.stock -= item["quantity"]
-                    product.save()
+                        if coupon:
+                            CouponUsage.objects.get_or_create(
+                                coupon=coupon,
+                                user=request.user
+                            )
+                            if coupon.usage_limit > 0 and coupon.used_count < coupon.usage_limit:
+                                coupon.used_count += 1
+                                coupon.save(update_fields=["used_count"])
 
-                if coupon:
-                    CouponUsage.objects.get_or_create(
-                        coupon=coupon,
-                        user=request.user
-                    )
-                    if coupon.usage_limit > 0 and coupon.used_count < coupon.usage_limit:
-                        coupon.used_count += 1
-                        coupon.save(update_fields=["used_count"])
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                    return redirect("shops:checkout")
 
                 # clear cart
                 request.session.pop("cart", None)
@@ -526,8 +714,19 @@ def checkout_preview_api(request):
                     coupon.max_discount
                 )
 
-        except:
-            pass
+        except Coupon.DoesNotExist:
+            logger.warning(
+                "Coupon not found/invalid in checkout_preview_api. user_id=%s coupon_id=%s",
+                request.user.id,
+                coupon_id,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            logger.warning(
+                "Coupon preview calculation failed. user_id=%s coupon_id=%s error=%s",
+                request.user.id,
+                coupon_id,
+                exc,
+            )
 
     total_after_discount = subtotal - rank_discount - coupon_discount
 
@@ -651,6 +850,13 @@ def order_history(request):
             order.qr_shipper_url = f"{base_url}{path}"
         else:
             order.qr_shipper_url = request.build_absolute_uri(path)
+        order.qr_shipper_data_uri = _build_qr_svg_data_uri(order.qr_shipper_url)
+
+    export_query = ""
+    if is_admin:
+        params = request.GET.copy()
+        params.pop("page", None)
+        export_query = params.urlencode()
 
     return render(request, 'shops/order_history.html', {
         'orders': orders,
@@ -665,7 +871,77 @@ def order_history(request):
         'status_choices': Order.STATUS_CHOICES,
         'selected_customer': selected_customer,
         'selected_status': selected_status,
+        'export_query': export_query,
     })
+
+
+def _deduct_stock_when_paid(order):
+    """
+    Trừ kho đúng 1 lần khi đơn được xác nhận đã thanh toán.
+    """
+    with transaction.atomic():
+        locked_order = (
+            Order.objects
+            .select_for_update()
+            .prefetch_related("items")
+            .get(id=order.id)
+        )
+
+        if locked_order.paid:
+            return True, None
+
+        order_items = list(locked_order.items.all())
+        product_ids = [item.product_id for item in order_items]
+
+        locked_products = (
+            Product.objects
+            .select_for_update()
+            .filter(id__in=product_ids)
+        )
+        product_map = {product.id: product for product in locked_products}
+
+        for item in order_items:
+            product = product_map.get(item.product_id)
+            if not product:
+                return False, "Một số sản phẩm trong đơn không còn tồn tại."
+            if product.stock < item.quantity:
+                return False, f"Sản phẩm '{product.name}' chỉ còn {product.stock} sản phẩm."
+
+        for item in order_items:
+            product = product_map[item.product_id]
+            product.stock -= item.quantity
+            product.sold += item.quantity
+            product.save(update_fields=["stock", "sold"])
+
+        locked_order.paid = True
+        locked_order.save(update_fields=["paid", "updated_at"])
+
+    return True, None
+
+
+def _should_mark_paid(order, new_status):
+    if order.payment_method == "COD":
+        return new_status == "Delivered"
+    # Đơn online coi như đã thanh toán khi admin bắt đầu xử lý đơn.
+    return new_status in {"Processing", "Shipped", "Delivered"}
+
+
+def _apply_status_change(order, new_status):
+    old_status = order.status
+
+    if _should_mark_paid(order, new_status) and not order.paid:
+        ok, error_msg = _deduct_stock_when_paid(order)
+        if not ok:
+            return False, error_msg
+
+    order.status = new_status
+    order.save(update_fields=["status", "updated_at"])
+
+    if old_status != "Delivered" and new_status == "Delivered":
+        update_user_rank(order.user)
+
+    return True, None
+
 
 @login_required
 @require_POST
@@ -675,15 +951,51 @@ def admin_update_order_status(request, order_id):
     order = get_object_or_404(Order, id=order_id)
     new_status = request.POST.get("status", "").strip()
     valid_statuses = {s for s, _ in Order.STATUS_CHOICES}
+    next_url = request.POST.get("next") or reverse("shops:order_history")
+
     if new_status and new_status in valid_statuses:
-        order.status = new_status
-        order.save(update_fields=["status", "updated_at"])
+        ok, error_msg = _apply_status_change(order, new_status)
+        if not ok:
+            messages.error(request, f"Không thể cập nhật đơn #{order.id}: {error_msg}")
+    return redirect(next_url)
 
-    # ================= UPDATE USER RANK =================
-        if new_status == "Delivered":
-            update_user_rank(order.user)
 
-    return redirect("shops:order_history")
+@login_required
+@require_POST
+def admin_bulk_update_order_status(request):
+    if not (request.user.is_staff or request.user.is_superuser):
+        return HttpResponseForbidden("Bạn không có quyền thực hiện.")
+
+    new_status = request.POST.get("status", "").strip()
+    order_ids = request.POST.getlist("order_ids")
+    next_url = request.POST.get("next") or reverse("shops:order_history")
+    valid_statuses = {s for s, _ in Order.STATUS_CHOICES}
+
+    if not order_ids:
+        messages.warning(request, "Bạn chưa chọn đơn hàng nào.")
+        return redirect(next_url)
+
+    if new_status not in valid_statuses:
+        messages.error(request, "Trạng thái cập nhật không hợp lệ.")
+        return redirect(next_url)
+
+    success_count = 0
+    failed = []
+
+    orders = Order.objects.filter(id__in=order_ids).order_by("-created_at")
+    for order in orders:
+        ok, error_msg = _apply_status_change(order, new_status)
+        if ok:
+            success_count += 1
+        else:
+            failed.append(f"#{order.id}: {error_msg}")
+
+    if success_count:
+        messages.success(request, f"Đã cập nhật {success_count} đơn sang trạng thái {new_status}.")
+    if failed:
+        messages.error(request, "Không cập nhật được: " + "; ".join(failed[:5]))
+
+    return redirect(next_url)
 
 def save_model(self, request, obj, form, change):
     if obj.status == 'Delivered':
@@ -1038,6 +1350,16 @@ def order_bills_all_pdf(request):
         return HttpResponse(err, status=500)
 
     orders = Order.objects.prefetch_related('items__product').order_by('-created_at')
+    selected_customer = request.GET.get("customer", "").strip()
+    selected_status = request.GET.get("status", "").strip()
+
+    if selected_customer:
+        orders = orders.filter(user_id=selected_customer)
+    if selected_status:
+        orders = orders.filter(status=selected_status)
+
+    if not orders.exists():
+        return HttpResponse("Không có đơn hàng phù hợp bộ lọc để xuất PDF.", status=400)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
 

@@ -6,8 +6,9 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-receipt me-1"></i> Lịch sử đơn hàng</h4>
     {% if user.is_staff or user.is_superuser %}
-    <a class="btn btn-sm btn-outline-primary" target="_blank" href="{% url 'shops:order_bills_all_pdf' %}">
-      Xuất tất cả hóa đơn (PDF)
+    <a class="btn btn-sm btn-outline-primary" target="_blank"
+      href="{% url 'shops:order_bills_all_pdf' %}{% if export_query %}?{{ export_query }}{% endif %}">
+      Xuất hóa đơn theo bộ lọc (PDF)
     </a>
     {% endif %}
   </div>
@@ -42,6 +43,39 @@
   {% endif %}
 
   {% if orders %}
+  {% if is_admin %}
+  <form id="bulk-status-form"
+        method="post"
+        action="{% url 'shops:admin_bulk_update_order_status' %}"
+        class="card p-3 mb-3">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label mb-1">Cập nhật hàng loạt</label>
+        <select name="status" class="form-select form-select-sm">
+          {% for value, label in status_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-5">
+        <div class="form-check pt-4">
+          <input class="form-check-input" type="checkbox" id="check-all-orders">
+          <label class="form-check-label" for="check-all-orders">
+            Chọn tất cả đơn đang hiển thị
+          </label>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-success btn-sm w-100">
+          Cập nhật đơn đã chọn
+        </button>
+      </div>
+    </div>
+  </form>
+  {% endif %}
+
   <div class="accordion" id="ordersAccordion">
     {% for order in orders %}
     <div class="accordion-item order-card mb-3">
@@ -147,13 +181,21 @@
                 {{ order.get_payment_method_display }}
               </span>
               <div class="mt-2 text-end">
+                {% if order.qr_shipper_data_uri %}
                 <img
-                  src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ order.qr_shipper_url|urlencode }}"
+                  src="{{ order.qr_shipper_data_uri }}"
                   alt="QR đơn hàng"
                   width="100"
                   height="100"
                   class="border rounded bg-white p-1"
                 />
+                {% else %}
+                <a href="{{ order.qr_shipper_url }}"
+                   class="btn btn-sm btn-outline-secondary"
+                   target="_blank">
+                  Mở QR chi tiết đơn
+                </a>
+                {% endif %}
 
                 <div class="small text-muted mt-1">
                   Quét QR xem chi tiết đơn
@@ -164,6 +206,19 @@
 
           <!-- ACTION -->
           <div class="d-flex gap-2 flex-wrap">
+            {% if is_admin %}
+            <div class="form-check me-2">
+              <input class="form-check-input js-bulk-order"
+                     type="checkbox"
+                     name="order_ids"
+                     value="{{ order.id }}"
+                     form="bulk-status-form"
+                     id="bulk-order-{{ order.id }}">
+              <label class="form-check-label" for="bulk-order-{{ order.id }}">
+                Chọn đơn #{{ order.id }}
+              </label>
+            </div>
+            {% endif %}
             {% if order.status == "Pending" or order.status == "Processing" %}
             <form method="post" action="{% url 'shops:cancel_order' order.id %}">
               {% csrf_token %}
@@ -177,6 +232,7 @@
             {% if is_admin %}
             <form method="post" action="{% url 'shops:admin_update_order_status' order.id %}" class="d-flex gap-2">
               {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
               <select name="status" class="form-select form-select-sm" style="min-width: 160px;">
                 {% for value, label in status_choices %}
                 <option value="{{ value }}" {% if order.status == value %}selected{% endif %}>{{ label }}</option>
@@ -234,4 +290,24 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const checkAll = document.getElementById("check-all-orders");
+    const itemChecks = document.querySelectorAll(".js-bulk-order");
+    if (!checkAll || !itemChecks.length) return;
+
+    checkAll.addEventListener("change", function () {
+      itemChecks.forEach((cb) => { cb.checked = checkAll.checked; });
+    });
+
+    itemChecks.forEach((cb) => {
+      cb.addEventListener("change", function () {
+        checkAll.checked = Array.from(itemChecks).every((x) => x.checked);
+      });
+    });
+  })();
+</script>
 {% endblock %}
