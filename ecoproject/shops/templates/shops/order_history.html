@@ -270,6 +270,36 @@
     {% endfor %}
   </div>
 
+  {% if page_obj and page_obj.paginator.num_pages > 1 %}
+  <nav class="mt-4">
+    <ul class="pagination justify-content-center">
+      {% if page_obj.has_previous %}
+      <li class="page-item">
+        <a class="page-link" href="?{% if selected_customer %}customer={{ selected_customer|urlencode }}&{% endif %}{% if selected_status %}status={{ selected_status|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}">
+          Trước
+        </a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Trước</span></li>
+      {% endif %}
+
+      <li class="page-item disabled">
+        <span class="page-link">Trang {{ page_obj.number }}/{{ page_obj.paginator.num_pages }}</span>
+      </li>
+
+      {% if page_obj.has_next %}
+      <li class="page-item">
+        <a class="page-link" href="?{% if selected_customer %}customer={{ selected_customer|urlencode }}&{% endif %}{% if selected_status %}status={{ selected_status|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}">
+          Sau
+        </a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Sau</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+
   {% else %}
   <div class="card order-card p-4 text-center">
     <div class="fs-1 mb-2">📦</div>

@@ -127,7 +127,7 @@
             name="q"
             value="{{ search_query }}"
             class="form-control"
-            placeholder="Nhập tên sản phẩm..."
+            placeholder="Tên, mô tả hoặc danh mục..."
           >
         </div>
 
@@ -164,9 +164,9 @@
                 Đã bán {{ product.sold }}
               </div>
 
-              {% if product.stock > 0 %}
+              {% if product.available_stock > 0 %}
                 <div class="small text-success mb-2">
-                  Còn {{ product.stock }} sản phẩm
+                  Còn {{ product.available_stock }} sản phẩm
                 </div>
               {% else %}
                 <div class="small text-danger fw-semibold mb-2">

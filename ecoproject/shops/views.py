@@ -26,6 +26,7 @@ from datetime import timedelta
 from io import BytesIO
 import base64
 import logging
+import random
 from .utils.shipping import calculate_shipping_cost
 from django.db.models.functions import TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
@@ -75,11 +76,98 @@ def _build_qr_svg_data_uri(value, size=120):
         return ""
 
 
+def _available_stock(product):
+    return max(product.stock - product.reserved_stock, 0)
+
+
+def _pick_random_products(qs, limit, max_pool=500):
+    ids = list(qs.order_by("-id").values_list("id", flat=True)[:max_pool])
+    if not ids:
+        return qs.none()
+    picked_ids = random.sample(ids, min(limit, len(ids)))
+    preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(picked_ids)])
+    return qs.filter(id__in=picked_ids).order_by(preserved)
+
+
+def _get_coupon_discount(request, cart, subtotal, subtotal_after_rank):
+    coupon_discount = 0
+    coupon = None
+    coupon_id = request.session.get("coupon_id")
+
+    if not coupon_id:
+        return coupon, coupon_discount
+
+    try:
+        coupon = Coupon.objects.get(id=coupon_id)
+        if coupon.owner_id and coupon.owner_id != request.user.id:
+            request.session.pop("coupon_id", None)
+            return None, 0
+
+        if coupon.categories.exists():
+            eligible_subtotal = 0
+            cart_product_ids = [int(pid) for pid in cart.keys()]
+            products_in_cart = Product.objects.filter(id__in=cart_product_ids).select_related("category")
+            valid_categories = set(coupon.categories.values_list("id", flat=True))
+
+            for product in products_in_cart:
+                if product.category_id in valid_categories:
+                    item = cart.get(str(product.id), {})
+                    eligible_subtotal += item.get("quantity", 0) * item.get("price", 0)
+
+            coupon_discount = int(eligible_subtotal * coupon.discount / 100)
+        else:
+            coupon_discount = int(subtotal_after_rank * coupon.discount / 100)
+
+        if coupon.max_discount > 0:
+            coupon_discount = min(coupon_discount, coupon.max_discount)
+
+    except Coupon.DoesNotExist:
+        request.session.pop("coupon_id", None)
+        coupon = None
+        coupon_discount = 0
+    except (ValueError, TypeError, KeyError) as exc:
+        logger.warning(
+            "Coupon calculation failed. user_id=%s coupon_id=%s error=%s",
+            request.user.id,
+            coupon_id,
+            exc,
+        )
+        coupon = None
+        coupon_discount = 0
+
+    return coupon, coupon_discount
+
+
+def calculate_checkout_totals(request, address=""):
+    cart = request.session.get("cart", {})
+    subtotal = sum(item["quantity"] * item["price"] for item in cart.values())
+    rank_discount = calculate_rank_discount(request.user, subtotal)
+    subtotal_after_rank = subtotal - rank_discount
+    coupon, coupon_discount = _get_coupon_discount(request, cart, subtotal, subtotal_after_rank)
+    total_after_discount = subtotal - rank_discount - coupon_discount
+    if address and address.strip():
+        shipping_cost, distance = calculate_shipping_cost(address)
+    else:
+        shipping_cost, distance = 0, None
+    final_total = total_after_discount + shipping_cost
+    return {
+        "cart": cart,
+        "subtotal": subtotal,
+        "rank_discount": rank_discount,
+        "coupon": coupon,
+        "coupon_discount": coupon_discount,
+        "shipping_cost": shipping_cost,
+        "distance": distance,
+        "final_total": final_total,
+    }
+
+
 # ================= HOME =================
 
 def index(request):
     featured_products = Product.objects.filter(available=True).order_by('-id')[:8]
-    flash_products = Product.objects.filter(available=True, stock__gt=0).order_by('?')[:4]
+    flash_base_qs = Product.objects.filter(available=True, stock__gt=F("reserved_stock"))
+    flash_products = _pick_random_products(flash_base_qs, 4)
     now = timezone.now()
     flash_sale = FlashSale.objects.filter(is_active=True, start_time__lte=now,end_time__gte=now).first()    
 
@@ -107,7 +195,21 @@ def product(request):
         products = products.filter(category__slug=category_slug)
 
     if search_query:
-        products = products.filter(Q(name__icontains=search_query))
+        products = products.filter(
+            Q(name__icontains=search_query)
+            | Q(description__icontains=search_query)
+            | Q(category__name__icontains=search_query)
+        ).annotate(
+            match_rank=Case(
+                When(name__iexact=search_query, then=300),
+                When(name__istartswith=search_query, then=200),
+                When(name__icontains=search_query, then=120),
+                When(category__name__icontains=search_query, then=80),
+                When(description__icontains=search_query, then=40),
+                default=0,
+                output_field=IntegerField(),
+            )
+        )
 
     sort_map = {
         "newest": ("-id",),
@@ -118,7 +220,10 @@ def product(request):
     if sort not in sort_map:
         sort = "newest"
 
-    products = products.order_by(*sort_map[sort])
+    if search_query:
+        products = products.order_by("-match_rank", *sort_map[sort])
+    else:
+        products = products.order_by(*sort_map[sort])
 
     paginator = Paginator(products, 12)
     page_obj = paginator.get_page(request.GET.get("page"))
@@ -163,7 +268,8 @@ def detail(request, slug):
 
     preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(viewed)])
     viewed_products = Product.objects.filter(id__in=viewed).order_by(preserved)
-    suggest_products = Product.objects.exclude(id=product.id).order_by('?')[:6]
+    suggest_base_qs = Product.objects.filter(available=True).exclude(id=product.id)
+    suggest_products = _pick_random_products(suggest_base_qs, 6)
     compare_ids = [int(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
     is_in_compare = product.id in compare_ids
 
@@ -278,8 +384,9 @@ def delete_review(request, id):
 
 def add_to_cart(request, product_id):
     product = get_object_or_404(Product, id=product_id)
+    available_stock = _available_stock(product)
 
-    if product.stock <= 0:
+    if available_stock <= 0:
         return JsonResponse({
             'status': 'error',
             'message': 'Sản phẩm đã hết hàng'
@@ -290,10 +397,10 @@ def add_to_cart(request, product_id):
 
     if product_id_str in cart:
         # chặn vượt quá stock
-        if cart[product_id_str]['quantity'] + 1 > product.stock:
+        if cart[product_id_str]['quantity'] + 1 > available_stock:
             return JsonResponse({
                 'status': 'error',
-                'message': f'Chỉ còn {product.stock} sản phẩm'
+                'message': f'Chỉ còn {available_stock} sản phẩm'
             }, status=400)
 
         cart[product_id_str]['quantity'] += 1
@@ -346,8 +453,9 @@ def update_cart(request, product_id):
 @require_POST
 def buy_now(request, product_id):
     product = get_object_or_404(Product, id=product_id, available=True)
+    available_stock = _available_stock(product)
 
-    if product.stock <= 0:
+    if available_stock <= 0:
         messages.error(request, "Sản phẩm đã hết hàng.")
         return redirect("shops:detail", slug=product.slug)
 
@@ -355,8 +463,8 @@ def buy_now(request, product_id):
     product_id_str = str(product.id)
 
     current_qty = cart.get(product_id_str, {}).get("quantity", 0)
-    if current_qty + 1 > product.stock:
-        messages.error(request, f"Chỉ còn {product.stock} sản phẩm.")
+    if current_qty + 1 > available_stock:
+        messages.error(request, f"Chỉ còn {available_stock} sản phẩm.")
         return redirect("shops:detail", slug=product.slug)
 
     if product_id_str in cart:
@@ -457,82 +565,12 @@ def compare(request):
 
 @login_required
 def checkout(request):
-
-    cart = request.session.get("cart", {})
+    totals = calculate_checkout_totals(request, address="")
+    cart = totals["cart"]
 
     if not cart:
         messages.warning(request, "Giỏ hàng trống.")
         return redirect("shops:product")
-
-    # ===== SUBTOTAL =====
-
-    subtotal = sum(
-        item["quantity"] * item["price"]
-        for item in cart.values()
-    )
-
-    # ===== RANK DISCOUNT =====
-
-    rank_discount = calculate_rank_discount(
-        request.user,
-        subtotal
-    )
-
-    # ===== COUPON (optional) =====
-
-    coupon_discount = 0
-    coupon = None
-
-    coupon_id = request.session.get("coupon_id")
-
-    if coupon_id:
-        try:
-            coupon = Coupon.objects.get(id=coupon_id)
-            if coupon.owner_id and coupon.owner_id != request.user.id:
-                coupon = None
-                coupon_discount = 0
-                request.session.pop("coupon_id", None)
-            
-            if not coupon:
-                raise Coupon.DoesNotExist
-            
-            if coupon.categories.exists():
-                eligible_subtotal = 0
-                cart_product_ids = [int(pid) for pid in cart.keys()]
-                products_in_cart = Product.objects.filter(id__in=cart_product_ids)
-                
-                for product in products_in_cart:
-                    if product.category in coupon.categories.all():
-                        eligible_subtotal += cart[str(product.id)]['quantity'] * cart[str(product.id)]['price']
-                
-                coupon_discount = int(eligible_subtotal * coupon.discount / 100)
-            else:
-                coupon_discount = int(
-                    (subtotal - rank_discount)
-                    * coupon.discount / 100
-                )
-
-            if coupon.max_discount > 0:
-                coupon_discount = min(
-                    coupon_discount,
-                    coupon.max_discount
-                )
-        except Coupon.DoesNotExist:
-            pass
-
-    # ===== TOTAL AFTER DISCOUNT =====
-
-    total_after_discount = (
-        subtotal
-        - rank_discount
-        - coupon_discount
-    )
-
-    # ===== DEFAULT SHIPPING =====
-
-    shipping_cost = 0
-    distance = None
-    final_total = total_after_discount
 
     # ===== FORM =====
 
@@ -556,13 +594,7 @@ def checkout(request):
 
             address = profile_form.cleaned_data["address"]
 
-            # backend tính shipping
-            shipping_cost, distance = calculate_shipping_cost(address)
-
-            final_total = (
-                total_after_discount
-                + shipping_cost
-            )
+            totals = calculate_checkout_totals(request, address=address)
 
             # ===== PLACE ORDER =====
 
@@ -570,18 +602,34 @@ def checkout(request):
                 try:
                     with transaction.atomic():
                         product_ids = [int(pid) for pid in cart.keys()]
-                        products = Product.objects.filter(id__in=product_ids)
+                        products = Product.objects.select_for_update().filter(id__in=product_ids)
                         product_map = {str(product.id): product for product in products}
+
+                        # Reserve stock on order creation to prevent oversell.
+                        for product_id, item in cart.items():
+                            product = product_map.get(str(product_id))
+                            if not product:
+                                raise ValueError("Một số sản phẩm không còn tồn tại.")
+
+                            qty = int(item["quantity"])
+                            if qty <= 0:
+                                raise ValueError("Số lượng sản phẩm không hợp lệ trong giỏ hàng.")
+
+                            available_qty = _available_stock(product)
+                            if available_qty < qty:
+                                raise ValueError(
+                                    f"Sản phẩm '{product.name}' chỉ còn {available_qty} sản phẩm có thể đặt."
+                                )
 
                         order = Order.objects.create(
                             user=request.user,
                             address=address,
                             phone=profile_form.cleaned_data["phone"],
-                            total_price=final_total,
-                            shipping_cost=shipping_cost,
-                            rank_discount=rank_discount,
-                            discount=coupon_discount,
-                            coupon=coupon,
+                            total_price=totals["final_total"],
+                            shipping_cost=totals["shipping_cost"],
+                            rank_discount=totals["rank_discount"],
+                            discount=totals["coupon_discount"],
+                            coupon=totals["coupon"],
                             payment_method=selected_payment
                         )
 
@@ -602,14 +650,17 @@ def checkout(request):
                                 quantity=qty
                             )
 
-                        if coupon:
+                            product.reserved_stock += qty
+                            product.save(update_fields=["reserved_stock"])
+
+                        if totals["coupon"]:
                             CouponUsage.objects.get_or_create(
-                                coupon=coupon,
+                                coupon=totals["coupon"],
                                 user=request.user
                             )
-                            if coupon.usage_limit > 0 and coupon.used_count < coupon.usage_limit:
-                                coupon.used_count += 1
-                                coupon.save(update_fields=["used_count"])
+                            if totals["coupon"].usage_limit > 0 and totals["coupon"].used_count < totals["coupon"].usage_limit:
+                                totals["coupon"].used_count += 1
+                                totals["coupon"].save(update_fields=["used_count"])
 
                 except ValueError as exc:
                     messages.error(request, str(exc))
@@ -639,17 +690,17 @@ def checkout(request):
 
         "cart": cart,
 
-        "subtotal": subtotal,
+        "subtotal": totals["subtotal"],
 
-        "rank_discount": rank_discount,
+        "rank_discount": totals["rank_discount"],
 
-        "coupon_discount": coupon_discount,
+        "coupon_discount": totals["coupon_discount"],
 
-        "shipping_cost": shipping_cost,
+        "shipping_cost": totals["shipping_cost"],
 
-        "distance": distance,
+        "distance": totals["distance"],
 
-        "final_total": final_total,
+        "final_total": totals["final_total"],
 
         "profile_form": profile_form,
         "coupon_form": coupon_form,
@@ -663,123 +714,28 @@ def checkout(request):
     )
 @login_required
 def checkout_preview_api(request):
-
     address = request.GET.get("address", "")
-
-    cart = request.session.get("cart", {})
-
-    subtotal = sum(
-        item["quantity"] * item["price"]
-        for item in cart.values()
-    )
-
-    # rank discount
-    rank_discount = calculate_rank_discount(
-        request.user,
-        subtotal
-    )
-
-    subtotal_after_rank = subtotal - rank_discount
-
-    # coupon
-    coupon_discount = 0
-    coupon_id = request.session.get("coupon_id")
-
-    if coupon_id:
-
-        try:
-
-            coupon = Coupon.objects.get(id=coupon_id)
-            if coupon.owner_id and coupon.owner_id != request.user.id:
-                raise Coupon.DoesNotExist
-
-            if coupon.categories.exists():
-                eligible_subtotal = 0
-                cart_product_ids = [int(pid) for pid in cart.keys()]
-                products_in_cart = Product.objects.filter(id__in=cart_product_ids)
-                
-                for product in products_in_cart:
-                    if product.category in coupon.categories.all():
-                        eligible_subtotal += cart[str(product.id)]['quantity'] * cart[str(product.id)]['price']
-                
-                coupon_discount = int(eligible_subtotal * coupon.discount / 100)
-            else:
-                coupon_discount = int(
-                    subtotal_after_rank * coupon.discount / 100
-                )
-
-            if coupon.max_discount > 0:
-                coupon_discount = min(
-                    coupon_discount,
-                    coupon.max_discount
-                )
-
-        except Coupon.DoesNotExist:
-            logger.warning(
-                "Coupon not found/invalid in checkout_preview_api. user_id=%s coupon_id=%s",
-                request.user.id,
-                coupon_id,
-            )
-        except (ValueError, TypeError, KeyError) as exc:
-            logger.warning(
-                "Coupon preview calculation failed. user_id=%s coupon_id=%s error=%s",
-                request.user.id,
-                coupon_id,
-                exc,
-            )
-
-    total_after_discount = subtotal - rank_discount - coupon_discount
-
-    # SHIPPING — BACKEND ONLY
-    shipping_cost, distance = calculate_shipping_cost(address)
-
-    final_total = total_after_discount + shipping_cost
-
+    totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
-
-        "shipping_cost": shipping_cost,
-
-        "distance": distance,
-
-        "final_total": final_total
-
+        "subtotal": totals["subtotal"],
+        "rank_discount": totals["rank_discount"],
+        "coupon_discount": totals["coupon_discount"],
+        "shipping_cost": totals["shipping_cost"],
+        "distance": totals["distance"],
+        "final_total": totals["final_total"],
     })
 
 @login_required
 def checkout_summary_api(request):
-
     address = request.GET.get("address", "")
-
-    cart = request.session.get("cart", {})
-
-    subtotal = sum(
-        item["quantity"] * item["price"]
-        for item in cart.values()
-    )
-
-    rank_discount = calculate_rank_discount(
-        request.user,
-        subtotal
-    )
-
-    subtotal_after_discount = subtotal - rank_discount
-
-    shipping_cost, distance = calculate_shipping_cost(address)
-
-    final_total = subtotal_after_discount + shipping_cost
-
+    totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
-
-        "subtotal": subtotal,
-
-        "rank_discount": rank_discount,
-
-        "shipping_cost": shipping_cost,
-
-        "distance": distance,
-
-        "final_total": final_total
-
+        "subtotal": totals["subtotal"],
+        "rank_discount": totals["rank_discount"],
+        "coupon_discount": totals["coupon_discount"],
+        "shipping_cost": totals["shipping_cost"],
+        "distance": totals["distance"],
+        "final_total": totals["final_total"],
     })
 
 def _send_order_email(order, request):
@@ -843,6 +799,10 @@ def order_history(request):
         if selected_status:
             orders = orders.filter(status=selected_status)
 
+    paginator = Paginator(orders, 30 if is_admin else 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    orders = page_obj.object_list
+
     for order in orders:
         base_url = getattr(settings, "PUBLIC_BASE_URL", "").rstrip("/")
         path = reverse('shops:order_qr_public', args=[order.qr_token])
@@ -859,6 +819,7 @@ def order_history(request):
 
     return render(request, 'shops/order_history.html', {
         'orders': orders,
+        'page_obj': page_obj,
         'is_admin': is_admin,
         'customers': (
             Order.objects.select_related('user')
@@ -874,9 +835,10 @@ def order_history(request):
     })
 
 
-def _deduct_stock_when_paid(order):
+def _finalize_stock_when_paid(order):
     """
-    Trừ kho đúng 1 lần khi đơn được xác nhận đã thanh toán.
+    Chốt kho đúng 1 lần khi đơn được xác nhận đã thanh toán:
+    stock -= quantity và release reserved_stock.
     """
     with transaction.atomic():
         locked_order = (
@@ -903,14 +865,17 @@ def _deduct_stock_when_paid(order):
             product = product_map.get(item.product_id)
             if not product:
                 return False, "Một số sản phẩm trong đơn không còn tồn tại."
+            if product.reserved_stock < item.quantity:
+                return False, f"Reserved stock của '{product.name}' không đủ để chốt đơn."
             if product.stock < item.quantity:
                 return False, f"Sản phẩm '{product.name}' chỉ còn {product.stock} sản phẩm."
 
         for item in order_items:
             product = product_map[item.product_id]
             product.stock -= item.quantity
+            product.reserved_stock -= item.quantity
             product.sold += item.quantity
-            product.save(update_fields=["stock", "sold"])
+            product.save(update_fields=["stock", "reserved_stock", "sold"])
 
         locked_order.paid = True
         locked_order.save(update_fields=["paid", "updated_at"])
@@ -918,20 +883,57 @@ def _deduct_stock_when_paid(order):
     return True, None
 
 
-def _should_mark_paid(order, new_status):
-    if order.payment_method == "COD":
-        return new_status == "Delivered"
-    # Đơn online coi như đã thanh toán khi admin bắt đầu xử lý đơn.
-    return new_status in {"Processing", "Shipped", "Delivered"}
+def _release_reserved_stock(order):
+    with transaction.atomic():
+        locked_order = (
+            Order.objects
+            .select_for_update()
+            .prefetch_related("items")
+            .get(id=order.id)
+        )
+
+        order_items = list(locked_order.items.all())
+        product_ids = [item.product_id for item in order_items]
+        locked_products = Product.objects.select_for_update().filter(id__in=product_ids)
+        product_map = {product.id: product for product in locked_products}
+
+        for item in order_items:
+            product = product_map.get(item.product_id)
+            if not product:
+                continue
+            product.reserved_stock = max(product.reserved_stock - item.quantity, 0)
+            product.save(update_fields=["reserved_stock"])
+
+
+ALLOWED_STATUS_TRANSITIONS = {
+    "Pending": {"Pending", "Processing", "Cancelled"},
+    "Processing": {"Processing", "Shipped", "Cancelled"},
+    "Shipped": {"Shipped", "Delivered"},
+    "Delivered": {"Delivered"},
+    "Cancelled": {"Cancelled"},
+}
 
 
 def _apply_status_change(order, new_status):
     old_status = order.status
+    allowed_next = ALLOWED_STATUS_TRANSITIONS.get(old_status, {old_status})
+    if new_status not in allowed_next:
+        return False, f"Không thể chuyển trạng thái từ {old_status} sang {new_status}."
 
-    if _should_mark_paid(order, new_status) and not order.paid:
-        ok, error_msg = _deduct_stock_when_paid(order)
+    should_mark_paid = (
+        (order.payment_method == "COD" and new_status == "Delivered")
+        or (order.payment_method != "COD" and new_status in {"Processing", "Shipped", "Delivered"})
+    )
+
+    if should_mark_paid and not order.paid:
+        ok, error_msg = _finalize_stock_when_paid(order)
         if not ok:
             return False, error_msg
+
+    if new_status == "Cancelled":
+        if order.paid:
+            return False, "Đơn đã thanh toán, không thể huỷ theo luồng hiện tại."
+        _release_reserved_stock(order)
 
     order.status = new_status
     order.save(update_fields=["status", "updated_at"])
@@ -1014,11 +1016,12 @@ def can_cancel(self):
 def cancel_order(request, order_id):
     order = get_object_or_404(Order, id=order_id, user=request.user)
 
-    if not order.can_cancel():
+    if order.status not in ["Pending", "Processing"]:
         return redirect('shops:order_history')
 
-    order.status = 'Cancelled'
-    order.save()
+    ok, error_msg = _apply_status_change(order, "Cancelled")
+    if not ok:
+        messages.error(request, f"Không thể huỷ đơn #{order.id}: {error_msg}")
 
     return redirect('shops:order_history')
 

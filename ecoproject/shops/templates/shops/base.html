@@ -34,6 +34,11 @@
         font-size: 0.65rem;
       }
 
+      .mini-badge {
+        margin-left: 4px;
+        font-size: 0.65rem;
+      }
+
       /* ===== FOOTER ===== */
       .site-footer {
         background: rgba(255, 255, 255, 0.85);
@@ -167,6 +172,20 @@
 
           <!-- RIGHT -->
           <ul class="navbar-nav ms-auto align-items-center">
+            <li class="nav-item me-2">
+              <a class="nav-link" href="{% url 'shops:wishlist' %}">
+                <i class="bi bi-heart"></i>
+                <span class="badge bg-danger rounded-pill mini-badge">{{ wishlist_items_count }}</span>
+              </a>
+            </li>
+
+            <li class="nav-item me-2">
+              <a class="nav-link" href="{% url 'shops:compare' %}">
+                <i class="bi bi-columns-gap"></i>
+                <span class="badge bg-secondary rounded-pill mini-badge">{{ compare_items_count }}</span>
+              </a>
+            </li>
+
             <!-- CART -->
             <li class="nav-item me-3 position-relative">
               <a class="nav-link" href="{% url 'shops:cart_detail' %}">

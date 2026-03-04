@@ -26,6 +26,7 @@ class Product(models.Model):
     sold = models.IntegerField(default=0)
     description = models.TextField(null=True, blank=True)
     stock = models.IntegerField(default=0)
+    reserved_stock = models.IntegerField(default=0)
     available = models.BooleanField(default=True)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     
@@ -37,6 +38,10 @@ class Product(models.Model):
     
     def rating_count(self):
         return self.reviews.filter(parent__isnull=True).count()
+
+    @property
+    def available_stock(self):
+        return max(self.stock - self.reserved_stock, 0)
 
     
 class FlashSale(models.Model):
