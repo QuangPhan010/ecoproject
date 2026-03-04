@@ -139,6 +139,9 @@
               <a href="{% url 'users:edit' %}" class="btn btn-primary btn-sm">
                 Chỉnh sửa hồ sơ
               </a>
+              <a href="{% url 'users:rewards' %}" class="btn btn-warning btn-sm">
+                Đổi thưởng
+              </a>
 
               <a href="#" class="btn btn-outline-secondary btn-sm">
                 Địa chỉ giao hàng
@@ -184,6 +187,20 @@
             <div class="stat-box">
               <strong>{{ request.user.profile.points|intcomma }}</strong><br />
               <small class="text-muted">Điểm</small>
+            </div>
+          </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ lifetime_points|intcomma }}</strong><br />
+              <small class="text-muted">Điểm tích lũy</small>
+            </div>
+          </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ minigame_plays|intcomma }}</strong><br />
+              <small class="text-muted">Lượt minigame</small>
             </div>
           </div>
         </div>

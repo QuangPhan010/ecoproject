@@ -1,0 +1,381 @@
+{% extends "users/base.html" %}
+{% load humanize %}
+{% block title %}Minigame Mystery Box | QShop{% endblock %}
+{% block content %}
+<style>
+  .game-wrap {
+    border-radius: 18px;
+    background: linear-gradient(155deg, #f8fbff, #eef3ff);
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+    padding: 24px;
+  }
+
+  .box-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+    gap: 14px;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  .gift-box {
+    border: 0;
+    border-radius: 14px;
+    height: 110px;
+    position: relative;
+    background: linear-gradient(145deg, #ef4444, #dc2626);
+    box-shadow: 0 10px 20px rgba(220, 38, 38, 0.28);
+    color: #fff;
+    font-weight: 700;
+    transition: transform 0.15s ease, filter 0.15s ease;
+  }
+
+  .gift-box:before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 14px;
+    height: 100%;
+    transform: translateX(-50%);
+    background: #f8d449;
+    border-radius: 8px;
+  }
+
+  .gift-box:after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 100%;
+    height: 14px;
+    transform: translateY(-50%);
+    background: #f8d449;
+    border-radius: 8px;
+  }
+
+  .gift-box span {
+    position: relative;
+    z-index: 2;
+    font-size: 24px;
+  }
+
+  .gift-box:hover:enabled {
+    transform: translateY(-3px);
+    filter: brightness(1.05);
+  }
+
+  .gift-box.revealed {
+    background: #e2e8f0;
+    box-shadow: none;
+    color: #334155;
+  }
+
+  .gift-box.revealed:before,
+  .gift-box.revealed:after {
+    display: none;
+  }
+
+  .open-option.active {
+    border-color: #0d6efd;
+    background: #0d6efd;
+    color: #fff;
+  }
+
+  .reward-log {
+    min-height: 56px;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="game-wrap">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <div>
+        <h4 class="mb-1">🎁 Mystery Box</h4>
+        <div class="text-muted mb-2">
+          Mỗi lượt mở sẽ tạo board mới. Bạn có thể mở 1, 3 hoặc 5 hộp/lượt.
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a
+            href="{% url 'users:minigame' %}?box=standard"
+            class="btn btn-sm {% if selected_box_type == 'standard' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+          >
+            Standard Box
+          </a>
+          {% if can_use_premium_box %}
+          <a
+            href="{% url 'users:minigame' %}?box=premium"
+            class="btn btn-sm {% if selected_box_type == 'premium' %}btn-warning{% else %}btn-outline-warning{% endif %}"
+          >
+            Premium Box
+          </a>
+          {% else %}
+          <button type="button" class="btn btn-sm btn-outline-secondary" disabled>
+            Premium Box (Rank Gold+)
+          </button>
+          {% endif %}
+        </div>
+      </div>
+      <span class="badge text-bg-primary">
+        Lượt còn lại: <span id="play-count">{{ minigame_plays|intcomma }}</span>
+      </span>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+      <span class="small text-muted">Chọn số hộp mở:</span>
+      {% for n in open_options %}
+      <button type="button" class="btn btn-sm btn-outline-primary open-option {% if n == 1 %}active{% endif %}" data-count="{{ n }}">
+        Mở {{ n }} hộp
+      </button>
+      {% endfor %}
+    </div>
+
+    <div class="reward-log alert alert-info mb-4" id="reward-log">
+      Chọn một hộp quà để bắt đầu.
+    </div>
+
+    <div class="box-grid" id="box-grid">
+      {% for i in "012345678" %}
+      <button type="button" class="gift-box" data-index="{{ forloop.counter0 }}">
+        <span>🎁</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    <hr class="my-4" />
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="mb-0">Lịch sử mở hộp gần đây</h6>
+      <span class="text-muted small">12 lượt gần nhất</span>
+    </div>
+    {% if recent_box_histories %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Thời gian</th>
+            <th>Mở</th>
+            <th>Phần thưởng</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in recent_box_histories %}
+          <tr>
+            <td>{{ h.created_at|date:"d/m/Y H:i:s" }}</td>
+            <td>{{ h.open_count }} hộp</td>
+            <td>
+              {% for reward in h.rewards %}
+                {{ reward }}{% if not forloop.last %} | {% endif %}
+              {% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-muted">Bạn chưa có lịch sử mở hộp.</div>
+    {% endif %}
+
+    {% if request.user.is_staff or request.user.is_superuser %}
+    <hr class="my-4" />
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="mb-0">Quản lý quà Mystery Box (Admin)</h6>
+      <span class="text-muted small">Chỉnh trực tiếp tại trang này</span>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="fw-semibold mb-2">Thêm quà mới</div>
+      <form method="post" action="{% url 'users:manage_mystery_rewards' %}" class="row g-2">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
+        <div class="col-lg-3">
+          <input class="form-control" name="name" placeholder="Tên quà" required>
+        </div>
+        <div class="col-lg-2">
+          <select class="form-select" name="box_tier">
+            <option value="STANDARD">STANDARD</option>
+            <option value="PREMIUM">PREMIUM</option>
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <select class="form-select" name="reward_type">
+            <option value="POINTS">POINTS</option>
+            <option value="PLAYS">PLAYS</option>
+            <option value="VOUCHER">VOUCHER</option>
+            <option value="EMPTY">EMPTY</option>
+          </select>
+        </div>
+        <div class="col-lg-1"><input class="form-control" name="points_value" type="number" min="0" placeholder="P"></div>
+        <div class="col-lg-1"><input class="form-control" name="plays_value" type="number" min="0" placeholder="L"></div>
+        <div class="col-lg-1"><input class="form-control" name="voucher_discount" type="number" min="0" placeholder="%"></div>
+        <div class="col-lg-1"><input class="form-control" name="weight" type="number" min="1" value="1"></div>
+        <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
+      </form>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>Tên</th>
+            <th>Box</th>
+            <th>Type</th>
+            <th>P</th>
+            <th>L</th>
+            <th>%</th>
+            <th>Max</th>
+            <th>Ngày</th>
+            <th>W</th>
+            <th>Sort</th>
+            <th>On</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in manage_rewards %}
+          <tr>
+            <form method="post" action="{% url 'users:manage_mystery_rewards' %}">
+              {% csrf_token %}
+              <input type="hidden" name="reward_id" value="{{ r.id }}">
+              <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
+              <td><input class="form-control form-control-sm" name="name" value="{{ r.name }}"></td>
+              <td>
+                <select class="form-select form-select-sm" name="box_tier">
+                  <option value="STANDARD" {% if r.box_tier == "STANDARD" %}selected{% endif %}>STANDARD</option>
+                  <option value="PREMIUM" {% if r.box_tier == "PREMIUM" %}selected{% endif %}>PREMIUM</option>
+                </select>
+              </td>
+              <td>
+                <select class="form-select form-select-sm" name="reward_type">
+                  <option value="POINTS" {% if r.reward_type == "POINTS" %}selected{% endif %}>POINTS</option>
+                  <option value="PLAYS" {% if r.reward_type == "PLAYS" %}selected{% endif %}>PLAYS</option>
+                  <option value="VOUCHER" {% if r.reward_type == "VOUCHER" %}selected{% endif %}>VOUCHER</option>
+                  <option value="EMPTY" {% if r.reward_type == "EMPTY" %}selected{% endif %}>EMPTY</option>
+                </select>
+              </td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="points_value" value="{{ r.points_value }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="plays_value" value="{{ r.plays_value }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_discount" value="{{ r.voucher_discount }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_max_discount" value="{{ r.voucher_max_discount }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_valid_days" value="{{ r.voucher_valid_days }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="1" name="weight" value="{{ r.weight }}"></td>
+              <td><input class="form-control form-control-sm" type="number" min="0" name="sort_order" value="{{ r.sort_order }}"></td>
+              <td><input class="form-check-input" type="checkbox" name="active" {% if r.active %}checked{% endif %}></td>
+              <td class="d-flex gap-1">
+                <button class="btn btn-sm btn-success" name="action" value="update">Lưu</button>
+                <button class="btn btn-sm btn-outline-secondary" name="action" value="toggle">Bật/Tắt</button>
+              </td>
+            </form>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let cookie of cookies) {
+        cookie = cookie.trim();
+        if (cookie.startsWith(name + "=")) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  const csrftoken = getCookie("csrftoken");
+  const rewardLog = document.getElementById("reward-log");
+  const playCountEl = document.getElementById("play-count");
+  const boxGrid = document.getElementById("box-grid");
+  const optionButtons = document.querySelectorAll(".open-option");
+  const selectedBoxType = "{{ selected_box_type }}";
+  let openCount = 1;
+  let playing = false;
+
+  optionButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      optionButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      openCount = Number(btn.dataset.count);
+    });
+  });
+
+  function resetBoard() {
+    boxGrid.querySelectorAll(".gift-box").forEach((btn) => {
+      btn.disabled = false;
+      btn.classList.remove("revealed");
+      btn.innerHTML = "<span>🎁</span>";
+    });
+  }
+
+  function formatRewards(rewards) {
+    return rewards.map((r, idx) => `${idx + 1}. ${r.label}`).join(" | ");
+  }
+
+  boxGrid.querySelectorAll(".gift-box").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (playing) return;
+      playing = true;
+
+      boxGrid.querySelectorAll(".gift-box").forEach((b) => (b.disabled = true));
+
+      const form = new URLSearchParams();
+      form.append("open_count", String(openCount));
+      form.append("box_type", selectedBoxType);
+      form.append("clicked_index", btn.dataset.index);
+
+      try {
+        const res = await fetch("{% url 'users:open_mystery_box' %}", {
+          method: "POST",
+          headers: {
+            "X-CSRFToken": csrftoken,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: form.toString(),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+          rewardLog.className = "reward-log alert alert-danger mb-4";
+          rewardLog.textContent = data.error || "Không thể mở hộp.";
+          resetBoard();
+          playing = false;
+          return;
+        }
+
+        data.rewards.forEach((reward) => {
+          const target = boxGrid.querySelector(`.gift-box[data-index="${reward.index}"]`);
+          if (!target) return;
+          target.classList.add("revealed");
+          target.innerHTML = `<span style="font-size:14px">${reward.label}</span>`;
+        });
+
+        playCountEl.textContent = data.remaining_plays.toLocaleString("vi-VN");
+        rewardLog.className = "reward-log alert alert-success mb-4";
+        rewardLog.textContent = "Kết quả: " + formatRewards(data.rewards);
+
+        setTimeout(() => {
+          resetBoard();
+          playing = false;
+        }, 1800);
+      } catch (e) {
+        rewardLog.className = "reward-log alert alert-danger mb-4";
+        rewardLog.textContent = "Lỗi kết nối, vui lòng thử lại.";
+        resetBoard();
+        playing = false;
+      }
+    });
+  });
+</script>
+{% endblock %}

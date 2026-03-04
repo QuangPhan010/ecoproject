@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 # Create your models here.
@@ -12,7 +13,12 @@ class Profile(models.Model):
 
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    # Available points that users can spend on rewards.
     points = models.IntegerField(default=0)
+    # Lifetime earned points used for rank calculation.
+    lifetime_points = models.IntegerField(default=0)
+    # Play credits exchanged from points.
+    minigame_plays = models.IntegerField(default=0)
 
     RANK_NEWBIE = "Newbie"
     RANK_EXPLORER = "Explorer"
@@ -141,3 +147,103 @@ class Profile(models.Model):
             self.rank,
             {"discount": 0, "max_discount": 0}
         )
+
+
+class PointExchange(models.Model):
+    TYPE_VOUCHER = "VOUCHER"
+    TYPE_MINIGAME = "MINIGAME"
+
+    TYPE_CHOICES = (
+        (TYPE_VOUCHER, "Doi voucher"),
+        (TYPE_MINIGAME, "Doi luot choi minigame"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="point_exchanges"
+    )
+    exchange_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    points_spent = models.PositiveIntegerField()
+    note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.exchange_type} - {self.points_spent}"
+
+
+class MysteryBoxHistory(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mystery_box_histories"
+    )
+    open_count = models.PositiveSmallIntegerField()
+    rewards = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user.username} - open {self.open_count} boxes"
+
+
+class RewardVoucherOption(models.Model):
+    name = models.CharField(max_length=120)
+    cost_points = models.PositiveIntegerField(default=100)
+    discount = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(100)]
+    )
+    max_discount = models.PositiveIntegerField(default=0)
+    valid_days = models.PositiveSmallIntegerField(default=7)
+    active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.name} ({self.cost_points} points)"
+
+
+class MysteryBoxRewardOption(models.Model):
+    BOX_STANDARD = "STANDARD"
+    BOX_PREMIUM = "PREMIUM"
+    BOX_CHOICES = (
+        (BOX_STANDARD, "Standard Box"),
+        (BOX_PREMIUM, "Premium Box"),
+    )
+
+    TYPE_POINTS = "POINTS"
+    TYPE_PLAYS = "PLAYS"
+    TYPE_VOUCHER = "VOUCHER"
+    TYPE_EMPTY = "EMPTY"
+
+    TYPE_CHOICES = (
+        (TYPE_POINTS, "Cong diem"),
+        (TYPE_PLAYS, "Cong luot choi"),
+        (TYPE_VOUCHER, "Voucher"),
+        (TYPE_EMPTY, "Khong trung"),
+    )
+
+    name = models.CharField(max_length=120)
+    box_tier = models.CharField(max_length=20, choices=BOX_CHOICES, default=BOX_STANDARD)
+    reward_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    points_value = models.PositiveIntegerField(default=0)
+    plays_value = models.PositiveIntegerField(default=0)
+    voucher_discount = models.PositiveSmallIntegerField(default=0)
+    voucher_max_discount = models.PositiveIntegerField(default=0)
+    voucher_valid_days = models.PositiveSmallIntegerField(default=0)
+    weight = models.PositiveIntegerField(default=1)
+    active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.name} [{self.box_tier}] ({self.reward_type}, w={self.weight})"

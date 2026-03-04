@@ -56,14 +56,20 @@ def update_user_rank_realtime(user):
 
     profile = user.profile
 
-    points = calculate_points(user)
+    earned_points = calculate_points(user)
 
-    new_rank = calculate_rank(points)
+    new_rank = calculate_rank(earned_points)
 
     updated = False
 
-    if profile.points != points:
-        profile.points = points
+    # Sync spendable points by delta from lifetime earned points.
+    points_delta = earned_points - profile.lifetime_points
+    if points_delta != 0:
+        profile.points = max(0, profile.points + points_delta)
+        profile.lifetime_points = earned_points
+        updated = True
+    elif profile.lifetime_points != earned_points:
+        profile.lifetime_points = earned_points
         updated = True
 
     if profile.rank != new_rank:
@@ -73,4 +79,4 @@ def update_user_rank_realtime(user):
     if updated:
         profile.save()
 
-    return profile.rank
+    return profile

@@ -307,6 +307,13 @@ def checkout(request):
     if coupon_id:
         try:
             coupon = Coupon.objects.get(id=coupon_id)
+            if coupon.owner_id and coupon.owner_id != request.user.id:
+                coupon = None
+                coupon_discount = 0
+                request.session.pop("coupon_id", None)
+            
+            if not coupon:
+                raise Coupon.DoesNotExist
             
             if coupon.categories.exists():
                 eligible_subtotal = 0
@@ -411,6 +418,15 @@ def checkout(request):
                     product.stock -= item["quantity"]
                     product.save()
 
+                if coupon:
+                    CouponUsage.objects.get_or_create(
+                        coupon=coupon,
+                        user=request.user
+                    )
+                    if coupon.usage_limit > 0 and coupon.used_count < coupon.usage_limit:
+                        coupon.used_count += 1
+                        coupon.save(update_fields=["used_count"])
+
                 # clear cart
                 request.session.pop("cart", None)
                 request.session.pop("coupon_id", None)
@@ -486,6 +502,8 @@ def checkout_preview_api(request):
         try:
 
             coupon = Coupon.objects.get(id=coupon_id)
+            if coupon.owner_id and coupon.owner_id != request.user.id:
+                raise Coupon.DoesNotExist
 
             if coupon.categories.exists():
                 eligible_subtotal = 0
@@ -1240,6 +1258,10 @@ def apply_coupon(request):
                 valid_to__gte=now,
                 active=True
             )
+
+            if coupon.owner_id and coupon.owner_id != request.user.id:
+                messages.error(request, "Voucher này không thuộc ví của bạn.")
+                return redirect('shops:checkout')
 
             if coupon.categories.exists():
                 cart = request.session.get('cart', {})

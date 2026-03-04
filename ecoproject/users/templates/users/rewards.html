@@ -1,0 +1,261 @@
+{% extends "users/base.html" %}
+{% load humanize %}
+{% block title %}Đổi thưởng | QShop{% endblock %}
+{% block content %}
+<style>
+  .reward-shell {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #ffffff, #f6f9ff);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+    overflow: hidden;
+  }
+
+  .reward-header {
+    background: linear-gradient(120deg, #0f172a, #1d4ed8);
+    color: #fff;
+    padding: 28px;
+  }
+
+  .reward-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    font-weight: 600;
+    margin-right: 8px;
+  }
+
+  .reward-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #fff;
+    transition: 0.2s;
+  }
+
+  .reward-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 26px rgba(29, 78, 216, 0.12);
+  }
+
+  .reward-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+
+  .reward-sub {
+    color: #64748b;
+    font-size: 0.92rem;
+  }
+
+  .mbox-badge {
+    background: linear-gradient(120deg, #7c3aed, #2563eb);
+    color: #fff;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="reward-shell">
+    <div class="reward-header">
+      <h4 class="mb-2">Đổi thưởng</h4>
+      <p class="mb-3">Đổi điểm thành voucher hoặc lượt chơi minigame Mystery Box.</p>
+      <span class="reward-chip">⭐ Điểm hiện tại: {{ points|intcomma }}</span>
+      <span class="reward-chip">🎁 Mystery Box: {{ minigame_plays|intcomma }} lượt</span>
+    </div>
+
+    <div class="p-4">
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="reward-card p-3 h-100">
+            <div class="reward-title mb-1">Đổi voucher</div>
+            <div class="reward-sub mb-3">Nhận mã giảm giá dùng ngay ở checkout.</div>
+            <form method="post" action="{% url 'users:redeem_points_voucher' %}">
+              {% csrf_token %}
+              {% if voucher_options %}
+              <select name="voucher_option" class="form-select mb-3">
+                {% for option in voucher_options %}
+                <option value="{{ option.id }}">
+                  {{ option.name }} | {{ option.cost_points|intcomma }} điểm | tối đa {{ option.max_discount|intcomma }}₫
+                </option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-primary w-100">Đổi voucher</button>
+              {% else %}
+              <div class="text-muted">Hiện chưa có gói voucher do admin cấu hình.</div>
+              {% endif %}
+            </form>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="reward-card p-3 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="reward-title">Minigame Mystery Box</div>
+              <span class="mbox-badge">HOT</span>
+            </div>
+            <div class="reward-sub mb-3">Đổi điểm lấy lượt mở hộp bí ẩn.</div>
+            <form method="post" action="{% url 'users:redeem_points_minigame' %}">
+              {% csrf_token %}
+              <select name="minigame_option" class="form-select mb-3">
+                {% for option in minigame_options %}
+                <option value="{{ option.key }}">
+                  {{ option.label }} | {{ option.cost|intcomma }} điểm
+                </option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-outline-primary w-100">Đổi lượt Mystery Box</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Ví voucher của bạn</h6>
+        <span class="text-muted small">Chỉ hiển thị voucher còn hiệu lực</span>
+      </div>
+      {% if owned_vouchers %}
+      <div class="row g-3 mb-4">
+        {% for v in owned_vouchers %}
+        <div class="col-md-6 col-xl-4">
+          <div class="reward-card p-3 h-100">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <div>
+                <div class="reward-title">{{ v.discount }}% OFF</div>
+                <div class="reward-sub">Tối đa {{ v.max_discount|intcomma }}₫</div>
+              </div>
+              <span class="badge text-bg-success">Sẵn sàng</span>
+            </div>
+            <div class="small mb-2">
+              Mã: <code>{{ v.code }}</code>
+            </div>
+            <div class="small text-muted">
+              Hạn dùng: {{ v.valid_to|date:"d/m/Y H:i" }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted mb-4">Ví voucher đang trống. Hãy đổi điểm để nhận voucher.</div>
+      {% endif %}
+
+      {% if request.user.is_staff or request.user.is_superuser %}
+      <hr class="my-4">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Quản lý gói voucher đổi điểm (Admin)</h6>
+        <span class="text-muted small">Chỉnh trực tiếp tại trang này</span>
+      </div>
+
+      <div class="card p-3 mb-3">
+        <div class="fw-semibold mb-2">Thêm gói voucher</div>
+        <form method="post" action="{% url 'users:manage_voucher_options' %}" class="row g-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create">
+          <div class="col-lg-4">
+            <input class="form-control" name="name" placeholder="Tên gói voucher" required>
+          </div>
+          <div class="col-lg-2">
+            <input class="form-control" name="cost_points" type="number" min="1" placeholder="Điểm" required>
+          </div>
+          <div class="col-lg-1">
+            <input class="form-control" name="discount" type="number" min="1" max="100" placeholder="%">
+          </div>
+          <div class="col-lg-2">
+            <input class="form-control" name="max_discount" type="number" min="0" placeholder="Giảm tối đa">
+          </div>
+          <div class="col-lg-1">
+            <input class="form-control" name="valid_days" type="number" min="1" placeholder="Ngày">
+          </div>
+          <div class="col-lg-1">
+            <input class="form-control" name="sort_order" type="number" min="0" value="0">
+          </div>
+          <div class="col-lg-1 d-flex align-items-center">
+            <input class="form-check-input me-2" type="checkbox" name="active" checked>
+            <button class="btn btn-primary btn-sm">Thêm</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="table-responsive mb-3">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Tên</th>
+              <th>Điểm</th>
+              <th>%</th>
+              <th>Tối đa</th>
+              <th>Ngày</th>
+              <th>Sort</th>
+              <th>On</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in manage_voucher_options %}
+            <tr>
+              <form method="post" action="{% url 'users:manage_voucher_options' %}">
+                {% csrf_token %}
+                <input type="hidden" name="option_id" value="{{ v.id }}">
+                <td><input class="form-control form-control-sm" name="name" value="{{ v.name }}"></td>
+                <td><input class="form-control form-control-sm" type="number" min="1" name="cost_points" value="{{ v.cost_points }}"></td>
+                <td><input class="form-control form-control-sm" type="number" min="1" max="100" name="discount" value="{{ v.discount }}"></td>
+                <td><input class="form-control form-control-sm" type="number" min="0" name="max_discount" value="{{ v.max_discount }}"></td>
+                <td><input class="form-control form-control-sm" type="number" min="1" name="valid_days" value="{{ v.valid_days }}"></td>
+                <td><input class="form-control form-control-sm" type="number" min="0" name="sort_order" value="{{ v.sort_order }}"></td>
+                <td><input class="form-check-input" type="checkbox" name="active" {% if v.active %}checked{% endif %}></td>
+                <td class="d-flex gap-1">
+                  <button class="btn btn-sm btn-success" name="action" value="update">Lưu</button>
+                  <button class="btn btn-sm btn-outline-secondary" name="action" value="toggle">Bật/Tắt</button>
+                </td>
+              </form>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <hr class="my-4">
+
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Lịch sử đổi điểm</h6>
+        <a href="{% url 'users:profile' %}" class="btn btn-sm btn-outline-secondary">Về hồ sơ</a>
+      </div>
+
+      {% if recent_exchanges %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Thời gian</th>
+              <th>Loại</th>
+              <th>Điểm trừ</th>
+              <th>Chi tiết</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent_exchanges %}
+            <tr>
+              <td>{{ item.created_at|date:"d/m/Y H:i" }}</td>
+              <td>{{ item.get_exchange_type_display }}</td>
+              <td>-{{ item.points_spent|intcomma }}</td>
+              <td>{{ item.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-muted">Chưa có lịch sử đổi điểm.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

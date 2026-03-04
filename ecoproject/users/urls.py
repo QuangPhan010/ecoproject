@@ -33,6 +33,13 @@ urlpatterns = [
     path('register/', views.register, name='register'),
 
     path('profile/', views.profile, name='profile'),
+    path('rewards/', views.rewards, name='rewards'),
+    path('rewards/voucher-options/manage/', views.manage_voucher_options, name='manage_voucher_options'),
+    path('minigame/', views.minigame, name='minigame'),
+    path('minigame/open-box/', views.open_mystery_box, name='open_mystery_box'),
+    path('minigame/rewards/manage/', views.manage_mystery_rewards, name='manage_mystery_rewards'),
     path('edit/', views.edit, name='edit'),
+    path('redeem/voucher/', views.redeem_points_voucher, name='redeem_points_voucher'),
+    path('redeem/minigame/', views.redeem_points_minigame, name='redeem_points_minigame'),
 
 ]
