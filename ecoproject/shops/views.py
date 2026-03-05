@@ -28,6 +28,7 @@ import base64
 import logging
 import random
 from .utils.shipping import calculate_shipping_cost
+from .utils.order_expiry import expire_stale_pending_orders
 from django.db.models.functions import TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
 from shops.discount_utils import calculate_rank_discount
@@ -383,6 +384,7 @@ def delete_review(request, id):
 # ================= CART =================
 
 def add_to_cart(request, product_id):
+    _expire_stale_pending_orders()
     product = get_object_or_404(Product, id=product_id)
     available_stock = _available_stock(product)
 
@@ -452,6 +454,7 @@ def update_cart(request, product_id):
 
 @require_POST
 def buy_now(request, product_id):
+    _expire_stale_pending_orders()
     product = get_object_or_404(Product, id=product_id, available=True)
     available_stock = _available_stock(product)
 
@@ -565,6 +568,7 @@ def compare(request):
 
 @login_required
 def checkout(request):
+    _expire_stale_pending_orders()
     totals = calculate_checkout_totals(request, address="")
     cart = totals["cart"]
 
@@ -714,6 +718,7 @@ def checkout(request):
     )
 @login_required
 def checkout_preview_api(request):
+    _expire_stale_pending_orders()
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
@@ -727,6 +732,7 @@ def checkout_preview_api(request):
 
 @login_required
 def checkout_summary_api(request):
+    _expire_stale_pending_orders()
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
@@ -903,6 +909,14 @@ def _release_reserved_stock(order):
                 continue
             product.reserved_stock = max(product.reserved_stock - item.quantity, 0)
             product.save(update_fields=["reserved_stock"])
+
+
+def _expire_stale_pending_orders(expire_hours=3, batch_size=200):
+    return expire_stale_pending_orders(
+        expire_hours=expire_hours,
+        batch_size=batch_size,
+        logger=logger,
+    )
 
 
 ALLOWED_STATUS_TRANSITIONS = {
