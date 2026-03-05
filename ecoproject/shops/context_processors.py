@@ -1,4 +1,5 @@
 from .models import WishlistItem
+from django.core.cache import cache
 
 
 def cart_context(request):
@@ -8,7 +9,12 @@ def cart_context(request):
     wishlist_items_count = 0
 
     if request.user.is_authenticated:
-        wishlist_items_count = WishlistItem.objects.filter(user=request.user).count()
+        cache_key = f"wishlist_items_count:{request.user.id}"
+        cached_count = cache.get(cache_key)
+        if cached_count is None:
+            cached_count = WishlistItem.objects.filter(user=request.user).count()
+            cache.set(cache_key, cached_count, 60)
+        wishlist_items_count = cached_count
 
     return {
         'cart_items_count': cart_items_count,

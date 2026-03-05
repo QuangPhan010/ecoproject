@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Product, FlashSale, ProductOption, ProductColor,
-    Order, OrderItem, Coupon, WishlistItem
+    Order, OrderItem, Coupon, WishlistItem, OrderStatusLog
 )
 
 # ================= PRODUCT =================
@@ -94,3 +94,10 @@ class WishlistItemAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "product", "created_at")
     search_fields = ("user__username", "product__name")
     list_filter = ("created_at",)
+
+
+@admin.register(OrderStatusLog)
+class OrderStatusLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "order", "from_status", "to_status", "source", "changed_by", "changed_at")
+    list_filter = ("source", "from_status", "to_status", "changed_at")
+    search_fields = ("order__id", "changed_by__username", "changed_by__email")

@@ -67,7 +67,7 @@
         <tr>
           <th>Tồn kho</th>
           {% for product in products %}
-          <td>{% if product.stock > 0 %}Còn {{ product.stock }}{% else %}<span class="text-danger">Hết hàng</span>{% endif %}</td>
+          <td>{% if product.available_stock > 0 %}Còn {{ product.available_stock }}{% else %}<span class="text-danger">Hết hàng</span>{% endif %}</td>
           {% endfor %}
         </tr>
         <tr>

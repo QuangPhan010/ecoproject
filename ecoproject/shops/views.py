@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem
+from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog
 from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm
 from users.forms import ProfileEditForm
 from .color_map import COLOR_MAP
@@ -18,10 +18,11 @@ from django.utils import timezone
 from django.conf import settings
 import os
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 from django.db import models
 from django.db.models import Count, Sum, F, Q, ExpressionWrapper, IntegerField
 from django.core.paginator import Paginator
+from django.core.cache import cache
 from datetime import timedelta
 from io import BytesIO
 import base64
@@ -384,7 +385,6 @@ def delete_review(request, id):
 # ================= CART =================
 
 def add_to_cart(request, product_id):
-    _expire_stale_pending_orders()
     product = get_object_or_404(Product, id=product_id)
     available_stock = _available_stock(product)
 
@@ -454,7 +454,6 @@ def update_cart(request, product_id):
 
 @require_POST
 def buy_now(request, product_id):
-    _expire_stale_pending_orders()
     product = get_object_or_404(Product, id=product_id, available=True)
     available_stock = _available_stock(product)
 
@@ -497,6 +496,7 @@ def toggle_wishlist(request, product_id):
     else:
         WishlistItem.objects.create(user=request.user, product=product)
         messages.success(request, "Đã thêm vào yêu thích.")
+    cache.delete(f"wishlist_items_count:{request.user.id}")
 
     return redirect(next_url)
 
@@ -568,7 +568,6 @@ def compare(request):
 
 @login_required
 def checkout(request):
-    _expire_stale_pending_orders()
     totals = calculate_checkout_totals(request, address="")
     cart = totals["cart"]
 
@@ -662,9 +661,6 @@ def checkout(request):
                                 coupon=totals["coupon"],
                                 user=request.user
                             )
-                            if totals["coupon"].usage_limit > 0 and totals["coupon"].used_count < totals["coupon"].usage_limit:
-                                totals["coupon"].used_count += 1
-                                totals["coupon"].save(update_fields=["used_count"])
 
                 except ValueError as exc:
                     messages.error(request, str(exc))
@@ -718,7 +714,6 @@ def checkout(request):
     )
 @login_required
 def checkout_preview_api(request):
-    _expire_stale_pending_orders()
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
@@ -732,7 +727,6 @@ def checkout_preview_api(request):
 
 @login_required
 def checkout_summary_api(request):
-    _expire_stale_pending_orders()
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
     return JsonResponse({
@@ -886,6 +880,9 @@ def _finalize_stock_when_paid(order):
         locked_order.paid = True
         locked_order.save(update_fields=["paid", "updated_at"])
 
+        if locked_order.coupon_id:
+            Coupon.objects.filter(id=locked_order.coupon_id).update(used_count=F("used_count") + 1)
+
     return True, None
 
 
@@ -928,7 +925,7 @@ ALLOWED_STATUS_TRANSITIONS = {
 }
 
 
-def _apply_status_change(order, new_status):
+def _apply_status_change(order, new_status, changed_by=None, source="system"):
     old_status = order.status
     allowed_next = ALLOWED_STATUS_TRANSITIONS.get(old_status, {old_status})
     if new_status not in allowed_next:
@@ -951,6 +948,14 @@ def _apply_status_change(order, new_status):
 
     order.status = new_status
     order.save(update_fields=["status", "updated_at"])
+    if old_status != new_status:
+        OrderStatusLog.objects.create(
+            order=order,
+            changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+            from_status=old_status,
+            to_status=new_status,
+            source=source,
+        )
 
     if old_status != "Delivered" and new_status == "Delivered":
         update_user_rank(order.user)
@@ -969,7 +974,12 @@ def admin_update_order_status(request, order_id):
     next_url = request.POST.get("next") or reverse("shops:order_history")
 
     if new_status and new_status in valid_statuses:
-        ok, error_msg = _apply_status_change(order, new_status)
+        ok, error_msg = _apply_status_change(
+            order,
+            new_status,
+            changed_by=request.user,
+            source="admin_single",
+        )
         if not ok:
             messages.error(request, f"Không thể cập nhật đơn #{order.id}: {error_msg}")
     return redirect(next_url)
@@ -999,7 +1009,12 @@ def admin_bulk_update_order_status(request):
 
     orders = Order.objects.filter(id__in=order_ids).order_by("-created_at")
     for order in orders:
-        ok, error_msg = _apply_status_change(order, new_status)
+        ok, error_msg = _apply_status_change(
+            order,
+            new_status,
+            changed_by=request.user,
+            source="admin_bulk",
+        )
         if ok:
             success_count += 1
         else:
@@ -1033,7 +1048,12 @@ def cancel_order(request, order_id):
     if order.status not in ["Pending", "Processing"]:
         return redirect('shops:order_history')
 
-    ok, error_msg = _apply_status_change(order, "Cancelled")
+    ok, error_msg = _apply_status_change(
+        order,
+        "Cancelled",
+        changed_by=request.user,
+        source="user_cancel",
+    )
     if not ok:
         messages.error(request, f"Không thể huỷ đơn #{order.id}: {error_msg}")
 
@@ -1057,13 +1077,33 @@ def order_qr_detail(request, order_id):
         'order': order
     })
 
+@require_http_methods(["GET", "POST"])
 def order_qr_public(request, token):
     order = get_object_or_404(Order, qr_token=token)
-    if order.status in ['Pending', 'Processing']:
-        order.status = 'Shipped'
-        order.save(update_fields=['status', 'updated_at'])
+    error_message = ""
+    success_message = ""
+    can_mark_shipped = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+
+    if request.method == "POST":
+        if not can_mark_shipped:
+            return HttpResponseForbidden("Bạn không có quyền cập nhật trạng thái đơn hàng.")
+        ok, error_msg = _apply_status_change(
+            order,
+            "Shipped",
+            changed_by=request.user,
+            source="qr_shipper",
+        )
+        if ok:
+            success_message = "Đơn hàng đã được cập nhật sang trạng thái Đang giao."
+            order.refresh_from_db(fields=["status", "updated_at", "paid"])
+        else:
+            error_message = error_msg or "Không thể cập nhật trạng thái đơn hàng."
+
     return render(request, 'shops/order_qr_shipper.html', {
-        'order': order
+        'order': order,
+        'can_mark_shipped': can_mark_shipped,
+        'error_message': error_message,
+        'success_message': success_message,
     })
 
 def _ensure_pdf_font():

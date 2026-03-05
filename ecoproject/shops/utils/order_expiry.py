@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from shops.models import Order, Product
+from shops.models import Order, Product, OrderStatusLog
 
 
 def expire_stale_pending_orders(expire_hours=3, batch_size=200, logger=None):
@@ -47,6 +47,13 @@ def expire_stale_pending_orders(expire_hours=3, batch_size=200, logger=None):
 
             order.status = "Cancelled"
             order.save(update_fields=["status", "updated_at"])
+            OrderStatusLog.objects.create(
+                order=order,
+                changed_by=None,
+                from_status="Pending",
+                to_status="Cancelled",
+                source="auto_expire",
+            )
             expired_count += 1
 
     if expired_count and logger:
