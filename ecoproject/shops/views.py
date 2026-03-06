@@ -29,7 +29,6 @@ import base64
 import logging
 import random
 from .utils.shipping import calculate_shipping_cost
-from .utils.order_expiry import expire_stale_pending_orders
 from django.db.models.functions import TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
 from shops.discount_utils import calculate_rank_discount
@@ -786,9 +785,19 @@ def order_created(request):
 def order_history(request):
     is_admin = request.user.is_staff or request.user.is_superuser
     if is_admin:
-        orders = Order.objects.select_related('user').prefetch_related('items__product').order_by('-created_at')
+        orders = (
+            Order.objects
+            .select_related('user')
+            .prefetch_related('items__product', 'status_logs__changed_by')
+            .order_by('-created_at')
+        )
     else:
-        orders = request.user.orders.select_related('user').prefetch_related('items__product').order_by('-created_at')
+        orders = (
+            request.user.orders
+            .select_related('user')
+            .prefetch_related('items__product', 'status_logs__changed_by')
+            .order_by('-created_at')
+        )
 
     selected_customer = request.GET.get("customer", "").strip()
     selected_status = request.GET.get("status", "").strip()
@@ -906,14 +915,6 @@ def _release_reserved_stock(order):
                 continue
             product.reserved_stock = max(product.reserved_stock - item.quantity, 0)
             product.save(update_fields=["reserved_stock"])
-
-
-def _expire_stale_pending_orders(expire_hours=3, batch_size=200):
-    return expire_stale_pending_orders(
-        expire_hours=expire_hours,
-        batch_size=batch_size,
-        logger=logger,
-    )
 
 
 ALLOWED_STATUS_TRANSITIONS = {
@@ -1073,8 +1074,10 @@ def order_qr_detail(request, order_id):
     )
     if not _can_view_order(request, order):
         return HttpResponseForbidden("Bạn không có quyền xem đơn hàng này.")
+    status_logs = order.status_logs.select_related("changed_by").all()
     return render(request, 'shops/order_qr_detail.html', {
-        'order': order
+        'order': order,
+        'status_logs': status_logs,
     })
 
 @require_http_methods(["GET", "POST"])

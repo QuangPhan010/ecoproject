@@ -239,6 +239,30 @@
             {% endif %}
           </div>
 
+          {% if is_admin %}
+          <div class="mt-3">
+            <div class="fw-semibold mb-1">Lịch sử trạng thái</div>
+            {% if order.status_logs.all %}
+            <div class="small border rounded p-2 bg-light">
+              {% for log in order.status_logs.all|slice:":8" %}
+              <div class="mb-1">
+                <strong>{{ log.changed_at|date:"d/m/Y H:i:s" }}</strong>:
+                {{ log.from_status }} → {{ log.to_status }}
+                {% if log.changed_by %}
+                bởi {{ log.changed_by.username }}
+                {% else %}
+                bởi hệ thống
+                {% endif %}
+                ({{ log.source }})
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="small text-muted">Chưa có log trạng thái.</div>
+            {% endif %}
+          </div>
+          {% endif %}
+
           <!-- ITEMS -->
           <div class="table-responsive mt-3">
             <table class="table align-middle">

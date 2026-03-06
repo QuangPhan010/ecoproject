@@ -73,10 +73,11 @@ class OrderAdmin(admin.ModelAdmin):
     ordering = ('-created_at',)
 
     inlines = [OrderItemInline]
-def get_readonly_fields(self, request, obj=None):
-    if obj and obj.status in ['Shipped', 'Delivered']:
-        return ('status',)
-    return ()
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj and obj.status in ['Shipped', 'Delivered']:
+            return ('status',)
+        return ()
 
 @admin.register(Coupon)
 class CouponAdmin(admin.ModelAdmin):

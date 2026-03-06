@@ -45,6 +45,27 @@
     <div class="text-end fw-bold text-danger">
       Tổng cộng: {{ order.total_price|intcomma }}₫
     </div>
+
+    <hr>
+    <h6>Lịch sử trạng thái</h6>
+    {% if status_logs %}
+    <ul class="mb-0">
+      {% for log in status_logs %}
+      <li class="small mb-1">
+        {{ log.changed_at|date:"d/m/Y H:i:s" }}:
+        {{ log.from_status }} → {{ log.to_status }}
+        {% if log.changed_by %}
+        bởi {{ log.changed_by.username }}
+        {% else %}
+        bởi hệ thống
+        {% endif %}
+        ({{ log.source }})
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted small mb-0">Chưa có lịch sử trạng thái.</p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

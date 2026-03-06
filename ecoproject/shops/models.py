@@ -43,6 +43,12 @@ class Product(models.Model):
     def available_stock(self):
         return max(self.stock - self.reserved_stock, 0)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["available"]),
+            models.Index(fields=["available", "reserved_stock"]),
+        ]
+
     
 class FlashSale(models.Model):
     title = models.CharField(max_length=200)
@@ -176,6 +182,11 @@ class Order(models.Model):
 
     class Meta:
         ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["paid", "status"]),
+        ]
 
     def __str__(self):
         return f'Order {self.id}'
@@ -201,6 +212,10 @@ class OrderStatusLog(models.Model):
 
     class Meta:
         ordering = ("-changed_at",)
+        indexes = [
+            models.Index(fields=["order", "-changed_at"]),
+            models.Index(fields=["source", "-changed_at"]),
+        ]
 
     def __str__(self):
         return f"Order #{self.order_id}: {self.from_status} -> {self.to_status}"
