@@ -12,10 +12,12 @@
       </a>
     </div>
 
-    <p><strong>👤 Người nhận:</strong>
-      {{ order.user.get_full_name|default:order.user.username }}</p>
-    <p><strong>📞 SĐT:</strong> {{ order.phone }}</p>
-    <p><strong>📍 Địa chỉ:</strong> {{ order.address }}</p>
+    <p><strong>👤 Người nhận:</strong> {{ receiver_name }}</p>
+    <p><strong>📞 SĐT:</strong> {{ receiver_phone }}</p>
+    <p><strong>📍 Địa chỉ:</strong> {{ receiver_address }}</p>
+    {% if not show_sensitive %}
+    <small class="text-muted">Thông tin nhận hàng đã được ẩn bớt trên link QR public.</small>
+    {% endif %}
 
     <hr>
 

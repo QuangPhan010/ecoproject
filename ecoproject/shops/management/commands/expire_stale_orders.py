@@ -36,5 +36,3 @@ class Command(BaseCommand):
             message = message % args
         self.stdout.write(message)
 
-#python manage.py expire_stale_orders --hours 3 --batch-size 200
-

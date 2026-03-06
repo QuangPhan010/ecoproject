@@ -1,8 +1,9 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from .models import (
     Product, FlashSale, ProductOption, ProductColor,
     Order, OrderItem, Coupon, WishlistItem, OrderStatusLog
 )
+from .views import _apply_status_change
 
 # ================= PRODUCT =================
 
@@ -46,12 +47,6 @@ class OrderAdmin(admin.ModelAdmin):
         'created_at',
     )
 
-    # 👉 CHỈNH TRỰC TIẾP TRÊN LIST
-    list_editable = (
-        'status',
-        'paid',
-    )
-
     # 👉 LINK CHI TIẾT
     list_display_links = ('id', 'user')
 
@@ -75,9 +70,45 @@ class OrderAdmin(admin.ModelAdmin):
     inlines = [OrderItemInline]
 
     def get_readonly_fields(self, request, obj=None):
+        readonly = ["paid"]
         if obj and obj.status in ['Shipped', 'Delivered']:
-            return ('status',)
-        return ()
+            readonly.append("status")
+        return tuple(readonly)
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            super().save_model(request, obj, form, change)
+            return
+
+        current = Order.objects.get(pk=obj.pk)
+
+        # Ensure status changes in Django Admin follow the same business flow as website.
+        if "status" in form.changed_data and obj.status != current.status:
+            ok, error_msg = _apply_status_change(
+                current,
+                obj.status,
+                changed_by=request.user,
+                source="admin_site",
+            )
+            if not ok:
+                self.message_user(
+                    request,
+                    f"Không thể cập nhật đơn #{obj.pk}: {error_msg}",
+                    level=messages.ERROR,
+                )
+                return
+
+            other_fields = [f for f in form.changed_data if f not in {"status", "paid"}]
+            if other_fields:
+                for field in other_fields:
+                    setattr(current, field, getattr(obj, field))
+                current.save(update_fields=other_fields + ["updated_at"])
+
+            obj.status = current.status
+            obj.paid = current.paid
+            return
+
+        super().save_model(request, obj, form, change)
 
 @admin.register(Coupon)
 class CouponAdmin(admin.ModelAdmin):

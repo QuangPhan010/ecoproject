@@ -20,7 +20,7 @@ import os
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.views.decorators.http import require_POST, require_http_methods
 from django.db import models
-from django.db.models import Count, Sum, F, Q, ExpressionWrapper, IntegerField
+from django.db.models import Count, Sum, F, Q, ExpressionWrapper, IntegerField, Prefetch
 from django.core.paginator import Paginator
 from django.core.cache import cache
 from datetime import timedelta
@@ -783,19 +783,40 @@ def order_created(request):
 
 @login_required
 def order_history(request):
+    status_logs_prefetch = Prefetch(
+        "status_logs",
+        queryset=(
+            OrderStatusLog.objects
+            .select_related("changed_by")
+            .only(
+                "id",
+                "order_id",
+                "from_status",
+                "to_status",
+                "source",
+                "changed_at",
+                "changed_by__id",
+                "changed_by__username",
+                "changed_by__first_name",
+                "changed_by__last_name",
+            )
+            .order_by("-changed_at")
+        ),
+    )
+
     is_admin = request.user.is_staff or request.user.is_superuser
     if is_admin:
         orders = (
             Order.objects
             .select_related('user')
-            .prefetch_related('items__product', 'status_logs__changed_by')
+            .prefetch_related('items__product', status_logs_prefetch)
             .order_by('-created_at')
         )
     else:
         orders = (
             request.user.orders
             .select_related('user')
-            .prefetch_related('items__product', 'status_logs__changed_by')
+            .prefetch_related('items__product', status_logs_prefetch)
             .order_by('-created_at')
         )
 
@@ -927,39 +948,52 @@ ALLOWED_STATUS_TRANSITIONS = {
 
 
 def _apply_status_change(order, new_status, changed_by=None, source="system"):
-    old_status = order.status
-    allowed_next = ALLOWED_STATUS_TRANSITIONS.get(old_status, {old_status})
-    if new_status not in allowed_next:
-        return False, f"Không thể chuyển trạng thái từ {old_status} sang {new_status}."
-
-    should_mark_paid = (
-        (order.payment_method == "COD" and new_status == "Delivered")
-        or (order.payment_method != "COD" and new_status in {"Processing", "Shipped", "Delivered"})
-    )
-
-    if should_mark_paid and not order.paid:
-        ok, error_msg = _finalize_stock_when_paid(order)
-        if not ok:
-            return False, error_msg
-
-    if new_status == "Cancelled":
-        if order.paid:
-            return False, "Đơn đã thanh toán, không thể huỷ theo luồng hiện tại."
-        _release_reserved_stock(order)
-
-    order.status = new_status
-    order.save(update_fields=["status", "updated_at"])
-    if old_status != new_status:
-        OrderStatusLog.objects.create(
-            order=order,
-            changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
-            from_status=old_status,
-            to_status=new_status,
-            source=source,
+    with transaction.atomic():
+        locked_order = (
+            Order.objects
+            .select_for_update()
+            .select_related("user")
+            .get(id=order.id)
         )
 
-    if old_status != "Delivered" and new_status == "Delivered":
-        update_user_rank(order.user)
+        old_status = locked_order.status
+        allowed_next = ALLOWED_STATUS_TRANSITIONS.get(old_status, {old_status})
+        if new_status not in allowed_next:
+            return False, f"Không thể chuyển trạng thái từ {old_status} sang {new_status}."
+
+        should_mark_paid = (
+            (locked_order.payment_method == "COD" and new_status == "Delivered")
+            or (locked_order.payment_method != "COD" and new_status in {"Processing", "Shipped", "Delivered"})
+        )
+
+        if should_mark_paid and not locked_order.paid:
+            ok, error_msg = _finalize_stock_when_paid(locked_order)
+            if not ok:
+                return False, error_msg
+            locked_order.refresh_from_db(fields=["paid", "updated_at"])
+
+        if new_status == "Cancelled":
+            if locked_order.paid:
+                return False, "Đơn đã thanh toán, không thể huỷ theo luồng hiện tại."
+            _release_reserved_stock(locked_order)
+
+        locked_order.status = new_status
+        locked_order.save(update_fields=["status", "updated_at"])
+        if old_status != new_status:
+            OrderStatusLog.objects.create(
+                order=locked_order,
+                changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+                from_status=old_status,
+                to_status=new_status,
+                source=source,
+            )
+
+        if old_status != "Delivered" and new_status == "Delivered":
+            update_user_rank(locked_order.user)
+
+        order.status = locked_order.status
+        order.paid = locked_order.paid
+        order.updated_at = locked_order.updated_at
 
     return True, None
 
@@ -1028,19 +1062,6 @@ def admin_bulk_update_order_status(request):
 
     return redirect(next_url)
 
-def save_model(self, request, obj, form, change):
-    if obj.status == 'Delivered':
-        obj.paid = True
-    super().save_model(request, obj, form, change)
-
-def get_readonly_fields(self, request, obj=None):
-    if obj and obj.status == 'Cancelled':
-        return ('status',)
-    return ()
-
-def can_cancel(self):
-    return self.status in ['Pending', 'Processing']
-
 @login_required
 @require_POST
 def cancel_order(request, order_id):
@@ -1066,6 +1087,42 @@ def _can_view_order(request, order):
         (request.user.is_staff or request.user.is_superuser or order.user_id == request.user.id)
     )
 
+
+def _mask_phone(phone):
+    phone = (phone or "").strip()
+    if not phone:
+        return ""
+    if len(phone) <= 4:
+        return "*" * len(phone)
+    return f"{phone[:3]}***{phone[-2:]}"
+
+
+def _mask_address(address):
+    address = (address or "").strip()
+    if not address:
+        return ""
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if len(parts) >= 2:
+        return f"..., {', '.join(parts[-2:])}"
+    if len(address) <= 8:
+        return "*" * len(address)
+    return f"{address[:6]}..."
+
+
+def _mask_name(name):
+    name = (name or "").strip()
+    if not name:
+        return "Khách hàng"
+    words = [w for w in name.split() if w]
+    if not words:
+        return "Khách hàng"
+    if len(words) == 1:
+        w = words[0]
+        if len(w) <= 2:
+            return w[0] + "*"
+        return f"{w[0]}{'*' * (len(w) - 2)}{w[-1]}"
+    return f"{words[0][0]}*** {' '.join(words[1:])}"
+
 @login_required
 def order_qr_detail(request, order_id):
     order = get_object_or_404(
@@ -1083,6 +1140,12 @@ def order_qr_detail(request, order_id):
 @require_http_methods(["GET", "POST"])
 def order_qr_public(request, token):
     order = get_object_or_404(Order, qr_token=token)
+    qr_ttl_hours = int(getattr(settings, "QR_PUBLIC_TOKEN_TTL_HOURS", 72) or 0)
+    if qr_ttl_hours > 0:
+        expire_at = order.created_at + timedelta(hours=qr_ttl_hours)
+        if timezone.now() > expire_at:
+            return HttpResponseForbidden("Liên kết QR đã hết hạn.")
+
     error_message = ""
     success_message = ""
     can_mark_shipped = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
@@ -1102,11 +1165,18 @@ def order_qr_public(request, token):
         else:
             error_message = error_msg or "Không thể cập nhật trạng thái đơn hàng."
 
+    receiver_name = order.user.get_full_name() or order.user.username
+    show_sensitive = can_mark_shipped
+
     return render(request, 'shops/order_qr_shipper.html', {
         'order': order,
         'can_mark_shipped': can_mark_shipped,
         'error_message': error_message,
         'success_message': success_message,
+        'show_sensitive': show_sensitive,
+        'receiver_name': receiver_name if show_sensitive else _mask_name(receiver_name),
+        'receiver_phone': order.phone if show_sensitive else _mask_phone(order.phone),
+        'receiver_address': order.address if show_sensitive else _mask_address(order.address),
     })
 
 def _ensure_pdf_font():

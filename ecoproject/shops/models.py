@@ -186,6 +186,7 @@ class Order(models.Model):
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["user", "-created_at"]),
             models.Index(fields=["paid", "status"]),
+            models.Index(fields=["user", "status", "-created_at"]),
         ]
 
     def __str__(self):
@@ -215,6 +216,7 @@ class OrderStatusLog(models.Model):
         indexes = [
             models.Index(fields=["order", "-changed_at"]),
             models.Index(fields=["source", "-changed_at"]),
+            models.Index(fields=["changed_by", "-changed_at"]),
         ]
 
     def __str__(self):
