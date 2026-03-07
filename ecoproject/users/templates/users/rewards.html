@@ -58,7 +58,20 @@
     font-weight: 600;
   }
 </style>
+{% if expiring_24h %}
+<div class="alert alert-danger">
+  ⚠️ Bạn có {{ expiring_24h|length }} voucher sẽ hết hạn trong 24h!
+  <a href="{% url 'shops:checkout' %}" class="btn btn-sm btn-light ms-2">
+    Dùng ngay
+  </a>
+</div>
+{% endif %}
 
+{% if expiring_72h %}
+<div class="alert alert-warning">
+  ⏰ {{ expiring_72h|length }} voucher sẽ hết hạn trong 3 ngày tới
+</div>
+{% endif %}
 <div class="container mt-4 mb-5">
   <div class="reward-shell">
     <div class="reward-header">

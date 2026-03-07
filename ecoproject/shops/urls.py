@@ -50,7 +50,8 @@ urlpatterns = [
     path("calc-shipping/", views.calc_shipping, name="calc_shipping"),
     path("api/checkout-preview/",views.checkout_preview_api,name="checkout_preview_api"),
     path("api/checkout-summary/", views.checkout_summary_api, name="checkout_summary_api"),
-
+    path("apply-best-coupon/",views.apply_best_coupon,name="apply_best_coupon"),
+    
     path('<slug:slug>/', views.detail, name='detail'),
 
 ]

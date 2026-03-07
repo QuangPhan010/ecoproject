@@ -1997,3 +1997,47 @@ def update_user_rank(user):
     if profile.rank != new_rank:
         profile.rank = new_rank
         profile.save()
+
+
+@login_required
+def apply_best_coupon(request):
+
+    cart = request.session.get("cart", {})
+    if not cart:
+        return redirect("shops:checkout")
+
+    subtotal = sum(item["quantity"] * item["price"] for item in cart.values())
+
+    rank_discount = calculate_rank_discount(request.user, subtotal)
+    subtotal_after_rank = subtotal - rank_discount
+
+    coupons = Coupon.objects.filter(
+        active=True
+    ).filter(
+        models.Q(owner=request.user) | models.Q(owner__isnull=True)
+    )
+
+    best_coupon = None
+    best_discount = 0
+
+    for coupon in coupons:
+
+        if coupon.is_expired:
+            continue
+
+        discount = int(subtotal_after_rank * coupon.discount / 100)
+
+        if coupon.max_discount > 0:
+            discount = min(discount, coupon.max_discount)
+
+        if discount > best_discount:
+            best_discount = discount
+            best_coupon = coupon
+
+    if best_coupon:
+        request.session["coupon_id"] = best_coupon.id
+        messages.success(request, f"Đã áp mã tốt nhất: {best_coupon.code}")
+    else:
+        messages.warning(request, "Không có coupon phù hợp")
+
+    return redirect("shops:checkout")

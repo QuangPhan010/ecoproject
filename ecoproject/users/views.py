@@ -143,6 +143,20 @@ def profile(request):
 def rewards(request):
     profile_obj = update_user_rank_realtime(request.user)
     now = timezone.now()
+
+    expiring_24h = Coupon.objects.filter(
+        owner=request.user,
+        active=True,
+        valid_to__gt=now,
+        valid_to__lte=now + timedelta(hours=24)
+    )
+
+    expiring_72h = Coupon.objects.filter(
+        owner=request.user,
+        active=True,
+        valid_to__gt=now + timedelta(hours=24),
+        valid_to__lte=now + timedelta(hours=72)
+    )
     owned_vouchers = (
         Coupon.objects
         .filter(
@@ -161,12 +175,15 @@ def rewards(request):
         "voucher_options": RewardVoucherOption.objects.filter(active=True).order_by("sort_order", "id"),
         "minigame_options": MINIGAME_OPTIONS,
         "owned_vouchers": owned_vouchers,
+        "expiring_24h" : expiring_24h,
+        "expiring_72h" : expiring_72h,
         "recent_exchanges": request.user.point_exchanges.all()[:10],
         "manage_voucher_options": (
             RewardVoucherOption.objects.all().order_by("sort_order", "id")
             if request.user.is_staff or request.user.is_superuser
             else []
         ),
+        
     }
     return render(request, "users/rewards.html", context)
 
