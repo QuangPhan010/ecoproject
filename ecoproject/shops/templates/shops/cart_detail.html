@@ -18,9 +18,26 @@
   border:1px solid var(--border);
 }
 
-.qty-input{
-  width:70px;
+.qty-controls{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--border);
+  border-radius:12px;
+  overflow:hidden;
+  background:#fff;
+}
+
+.qty-btn{
+  width:34px;
+  height:34px;
+  border:0;
+  background:transparent;
+}
+
+.qty-value{
+  min-width:42px;
   text-align:center;
+  font-weight:700;
 }
 
 .cart-total{
@@ -48,6 +65,8 @@
   <h4 class="mb-4">
     <i class="bi bi-cart3 me-1"></i> Giỏ hàng của bạn
   </h4>
+
+  <div id="cart-alert" class="alert alert-danger d-none" role="alert"></div>
 
   {% if not cart %}
     <!-- EMPTY CART -->
@@ -91,19 +110,31 @@
                 <form
                   action="{% url 'shops:update_cart' item_id %}"
                   method="post"
-                  class="d-flex justify-content-center gap-1"
+                  class="d-flex flex-column align-items-center gap-1 js-cart-update-form"
+                  data-item-id="{{ item_id }}"
                 >
                   {% csrf_token %}
-                  <input
-                    type="number"
-                    name="quantity"
-                    value="{{ item.quantity }}"
-                    min="1"
-                    class="form-control form-control-sm qty-input"
-                  >
-                  <button class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-arrow-repeat"></i>
-                  </button>
+                  <div class="qty-controls">
+                    <button
+                      type="button"
+                      class="qty-btn js-qty-change"
+                      data-direction="-1"
+                      {% if item.quantity <= 1 %}disabled{% endif %}
+                    >
+                      <i class="bi bi-dash-lg"></i>
+                    </button>
+                    <span class="qty-value js-qty-value">{{ item.quantity }}</span>
+                    <input type="hidden" name="quantity" value="{{ item.quantity }}" class="js-qty-input">
+                    <button
+                      type="button"
+                      class="qty-btn js-qty-change"
+                      data-direction="1"
+                      {% if item.quantity >= item.available_stock %}disabled{% endif %}
+                    >
+                      <i class="bi bi-plus-lg"></i>
+                    </button>
+                  </div>
+                  <small class="text-muted js-stock-text">Còn {{ item.available_stock }} sản phẩm</small>
                 </form>
               </td>
 
@@ -111,7 +142,7 @@
                 {{ item.price|intcomma }}₫
               </td>
 
-              <td class="text-end fw-semibold">
+              <td class="text-end fw-semibold js-item-total">
                 {{ item.total|intcomma }}₫
               </td>
 
@@ -140,7 +171,7 @@
 
       <div class="text-end">
         <div class="cart-total">
-          Tổng cộng: {{ total_price|intcomma }}₫
+          Tổng cộng: <span id="cart-total-price">{{ total_price|intcomma }}</span>₫
         </div>
         <a href="{% url 'shops:checkout' %}" class="btn btn-success mt-2 px-4">
           <i class="bi bi-credit-card me-1"></i> Thanh toán
@@ -150,4 +181,88 @@
 
   {% endif %}
 </div>
+<script>
+(() => {
+  const forms = document.querySelectorAll('.js-cart-update-form');
+  if (!forms.length) return;
+
+  const alertBox = document.getElementById('cart-alert');
+  const totalPriceEl = document.getElementById('cart-total-price');
+  const cartCountEl = document.getElementById('cart-count');
+
+  const formatCurrency = (value) => new Intl.NumberFormat('vi-VN').format(value);
+
+  const showError = (message) => {
+    alertBox.textContent = message;
+    alertBox.classList.remove('d-none');
+  };
+
+  const clearError = () => {
+    alertBox.textContent = '';
+    alertBox.classList.add('d-none');
+  };
+
+  forms.forEach((form) => {
+    const hiddenInput = form.querySelector('.js-qty-input');
+    const valueEl = form.querySelector('.js-qty-value');
+    const stockTextEl = form.querySelector('.js-stock-text');
+    const itemRow = form.closest('tr');
+    const itemTotalEl = itemRow.querySelector('.js-item-total');
+    const buttons = form.querySelectorAll('.js-qty-change');
+
+    const getStockFromText = () => Number((stockTextEl.textContent.match(/\d+/) || [hiddenInput.value])[0]);
+
+    const syncButtons = (quantity, availableStock) => {
+      buttons.forEach((button) => {
+        const direction = Number(button.dataset.direction);
+        button.disabled = direction < 0 ? quantity <= 1 : quantity >= availableStock;
+      });
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', async () => {
+        const currentQuantity = Number(hiddenInput.value);
+        const nextQuantity = currentQuantity + Number(button.dataset.direction);
+        if (nextQuantity < 1) return;
+
+        buttons.forEach((btn) => { btn.disabled = true; });
+        clearError();
+
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+              'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value,
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: new URLSearchParams({ quantity: nextQuantity }),
+          });
+
+          const data = await response.json();
+          if (!response.ok || data.status !== 'success') {
+            showError(data.message || 'Không thể cập nhật số lượng.');
+            syncButtons(data.quantity || currentQuantity, data.available_stock || getStockFromText());
+            return;
+          }
+
+          hiddenInput.value = data.quantity;
+          valueEl.textContent = data.quantity;
+          stockTextEl.textContent = `Còn ${data.available_stock} sản phẩm`;
+          itemTotalEl.textContent = `${formatCurrency(data.item_total)}₫`;
+          totalPriceEl.textContent = formatCurrency(data.total_price);
+          if (cartCountEl) {
+            cartCountEl.textContent = data.cart_items_count;
+          }
+          syncButtons(data.quantity, data.available_stock);
+        } catch (error) {
+          showError('Không thể cập nhật số lượng lúc này.');
+          syncButtons(currentQuantity, getStockFromText());
+        }
+      });
+    });
+
+    syncButtons(Number(hiddenInput.value), getStockFromText());
+  });
+})();
+</script>
 {% endblock %}

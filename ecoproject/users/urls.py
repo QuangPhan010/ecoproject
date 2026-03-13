@@ -25,15 +25,16 @@ urlpatterns = [
     path('password_change/', auth_view.PasswordChangeView.as_view(template_name='users/password_change_form.html', success_url=reverse_lazy('password_change_done')), name='password_change'),
     path('password_change/done/', auth_view.PasswordChangeDoneView.as_view(template_name='users/password_change_done.html'), name='password_change_done'),
 
-    # Password reset links
-    path('password_reset/', auth_view.PasswordResetView.as_view(template_name='users/password_reset_form.html'), name='password_reset'),
-    path('password_reset/done/', auth_view.PasswordResetDoneView.as_view(template_name='users/password_reset_done.html'), name='password_reset_done'),
-    path('reset/<uidb64>/<token>/', auth_view.PasswordResetConfirmView.as_view(template_name='users/password_reset_confirm.html'), name='password_reset_confirm'),
-    path('reset/done/', auth_view.PasswordResetCompleteView.as_view(template_name='users/password_reset_complete.html'), name='password_reset_complete'),
+    path('password_reset/', views.password_reset_request, name='password_reset'),
+    path('password_reset/verify/', views.password_reset_verify, name='password_reset_verify'),
+    path('password_reset/resend/', views.password_reset_resend, name='password_reset_resend'),
+    path('password_reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
+    path('password_reset/complete/', views.password_reset_complete, name='password_reset_complete'),
     path('register/', views.register, name='register'),
 
     path('profile/', views.profile, name='profile'),
     path('rewards/', views.rewards, name='rewards'),
+    path('admin/rewards/', views.reward_admin_console, name='reward_admin_console'),
     path('rewards/voucher-options/manage/', views.manage_voucher_options, name='manage_voucher_options'),
     path('minigame/', views.minigame, name='minigame'),
     path('minigame/open-box/', views.open_mystery_box, name='open_mystery_box'),

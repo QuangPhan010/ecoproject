@@ -2,16 +2,25 @@ from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
-from .forms import LoginForm, UserRegistrationForm, UserEditForm, ProfileEditForm
+from .forms import (
+    LoginForm,
+    UserRegistrationForm,
+    UserEditForm,
+    ProfileEditForm,
+    PasswordResetOTPRequestForm,
+    PasswordResetOTPVerifyForm,
+    PasswordResetOTPSetPasswordForm,
+)
 from .models import (
     Profile,
     PointExchange,
     MysteryBoxHistory,
     RewardVoucherOption,
     MysteryBoxRewardOption,
+    PasswordResetOTP,
 )
 from django.contrib import messages
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, User
 from shops.models import Order, Coupon
 from django.db.models import Sum
 from django.contrib.auth.decorators import login_required
@@ -20,6 +29,10 @@ from django.views.decorators.http import require_POST
 from django.utils import timezone
 from django.db import transaction
 from django.http import JsonResponse
+from django.core.exceptions import PermissionDenied
+from django.core.mail import send_mail
+from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from datetime import timedelta
 import uuid
 import random
@@ -37,6 +50,101 @@ MINIGAME_OPTIONS = [
     {"key": "G5", "label": "Mystery Box x5", "cost": 450, "plays": 5},
     {"key": "G12", "label": "Mystery Box x12", "cost": 1000, "plays": 12},
 ]
+
+MYSTERY_BOX_PITY_RULES = {
+    "standard": {
+        "field": "standard_voucher_pity",
+        "threshold": 6,
+        "boost_multiplier": 2.5,
+        "label": "Standard Box",
+    },
+    "premium": {
+        "field": "premium_voucher_pity",
+        "threshold": 4,
+        "boost_multiplier": 2.0,
+        "label": "Premium Box",
+    },
+}
+
+PASSWORD_RESET_OTP_SESSION_KEY = "password_reset_verified_otp_id"
+PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10
+PASSWORD_RESET_OTP_MAX_ATTEMPTS = 5
+PASSWORD_RESET_OTP_RESEND_SECONDS = 60
+
+
+def _require_reward_admin(user):
+    if not (user.is_staff or user.is_superuser):
+        raise PermissionDenied
+
+
+def _generate_email_otp():
+    return f"{random.randint(0, 999999):06d}"
+
+
+def _mask_email(email):
+    if "@" not in email:
+        return email
+    local, domain = email.split("@", 1)
+    if len(local) <= 2:
+        masked_local = local[0] + "*" * max(0, len(local) - 1)
+    else:
+        masked_local = local[:2] + "*" * (len(local) - 2)
+    return f"{masked_local}@{domain}"
+
+
+def _clear_password_reset_session(request):
+    request.session.pop(PASSWORD_RESET_OTP_SESSION_KEY, None)
+
+
+def _get_latest_password_reset_otp(email):
+    if not email:
+        return None
+    return (
+        PasswordResetOTP.objects
+        .filter(email__iexact=email)
+        .select_related("user")
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _get_resend_wait_seconds(email):
+    latest_otp = _get_latest_password_reset_otp(email)
+    if not latest_otp:
+        return 0
+    return latest_otp.resend_available_in(PASSWORD_RESET_OTP_RESEND_SECONDS)
+
+
+def _issue_password_reset_otp(user):
+    latest_otp = _get_latest_password_reset_otp(user.email)
+    resend_wait_seconds = latest_otp.resend_available_in(PASSWORD_RESET_OTP_RESEND_SECONDS) if latest_otp else 0
+    if resend_wait_seconds > 0:
+        return None, resend_wait_seconds
+
+    raw_otp = _generate_email_otp()
+    PasswordResetOTP.objects.filter(user=user, used=False).update(used=True)
+    otp = PasswordResetOTP.objects.create(
+        user=user,
+        email=user.email,
+        code=make_password(raw_otp),
+        expires_at=PasswordResetOTP.build_expiry(PASSWORD_RESET_OTP_EXPIRY_MINUTES),
+    )
+    return (otp, raw_otp), 0
+
+
+def _send_password_reset_otp_email(user, otp_code):
+    send_mail(
+        subject="Ma OTP dat lai mat khau QShop",
+        message=(
+            f"Xin chao {user.username},\n\n"
+            f"Ma OTP dat lai mat khau cua ban la: {otp_code}\n"
+            f"Ma co hieu luc trong {PASSWORD_RESET_OTP_EXPIRY_MINUTES} phut.\n"
+            "Neu ban khong yeu cau, hay bo qua email nay."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
 
 
 
@@ -85,6 +193,179 @@ def register(request):
         user_form = UserRegistrationForm()
 
     return render(request, 'users/register.html', {'user_form': user_form})
+
+
+def password_reset_request(request):
+    if request.user.is_authenticated:
+        return redirect("shops:index")
+
+    if request.method == "POST":
+        form = PasswordResetOTPRequestForm(request.POST)
+        if form.is_valid():
+            email = form.cleaned_data["email"].strip().lower()
+            user = (
+                User.objects
+                .filter(email__iexact=email, is_active=True)
+                .order_by("id")
+                .first()
+            )
+            _clear_password_reset_session(request)
+
+            if user:
+                issued_payload, resend_wait_seconds = _issue_password_reset_otp(user)
+                if resend_wait_seconds > 0:
+                    messages.error(request, f"Vui lòng chờ {resend_wait_seconds} giây trước khi yêu cầu OTP mới.")
+                    return redirect(f"{reverse('users:password_reset_verify')}?email={email}")
+                try:
+                    otp, raw_otp = issued_payload
+                    _send_password_reset_otp_email(user, raw_otp)
+                except Exception:
+                    otp.delete()
+                    messages.error(request, "Không thể gửi OTP qua email lúc này. Vui lòng thử lại sau.")
+                    return render(request, "users/password_reset_form.html", {"form": form})
+
+            return redirect(f"{reverse('users:password_reset_verify')}?email={email}")
+    else:
+        form = PasswordResetOTPRequestForm()
+
+    return render(request, "users/password_reset_form.html", {"form": form})
+
+
+def password_reset_verify(request):
+    if request.user.is_authenticated:
+        return redirect("shops:index")
+
+    initial_email = request.GET.get("email", "").strip().lower()
+    if request.method == "POST":
+        form = PasswordResetOTPVerifyForm(request.POST)
+        if form.is_valid():
+            email = form.cleaned_data["email"].strip().lower()
+            otp_code = form.cleaned_data["otp"]
+            otp = (
+                PasswordResetOTP.objects
+                .filter(email__iexact=email, used=False)
+                .select_related("user")
+                .order_by("-created_at")
+                .first()
+            )
+
+            if not otp or not check_password(otp_code, otp.code):
+                if otp:
+                    otp.attempts += 1
+                    if otp.attempts >= PASSWORD_RESET_OTP_MAX_ATTEMPTS:
+                        otp.used = True
+                    otp.save(update_fields=["attempts", "used"])
+                messages.error(request, "OTP không hợp lệ.")
+            elif otp.is_expired():
+                otp.used = True
+                otp.save(update_fields=["used"])
+                messages.error(request, "OTP đã hết hạn. Vui lòng yêu cầu mã mới.")
+            elif otp.attempts >= PASSWORD_RESET_OTP_MAX_ATTEMPTS:
+                otp.used = True
+                otp.save(update_fields=["used"])
+                messages.error(request, "OTP đã bị khóa sau quá nhiều lần nhập sai.")
+            else:
+                request.session[PASSWORD_RESET_OTP_SESSION_KEY] = otp.id
+                return redirect("users:password_reset_confirm")
+    else:
+        form = PasswordResetOTPVerifyForm(initial={"email": initial_email})
+
+    return render(
+        request,
+        "users/password_reset_done.html",
+        {
+            "form": form,
+            "masked_email": _mask_email(initial_email) if initial_email else "",
+            "verify_email": initial_email,
+            "otp_expiry_minutes": PASSWORD_RESET_OTP_EXPIRY_MINUTES,
+            "resend_wait_seconds": _get_resend_wait_seconds(initial_email),
+            "resend_cooldown_seconds": PASSWORD_RESET_OTP_RESEND_SECONDS,
+        },
+    )
+
+
+@require_POST
+def password_reset_resend(request):
+    if request.user.is_authenticated:
+        return redirect("shops:index")
+
+    email = request.POST.get("email", "").strip().lower()
+    if not email:
+        messages.error(request, "Thiếu email để gửi lại OTP.")
+        return redirect("users:password_reset")
+
+    user = (
+        User.objects
+        .filter(email__iexact=email, is_active=True)
+        .order_by("id")
+        .first()
+    )
+    if not user:
+        return redirect(f"{reverse('users:password_reset_verify')}?email={email}")
+
+    issued_payload, resend_wait_seconds = _issue_password_reset_otp(user)
+    if resend_wait_seconds > 0:
+        messages.error(request, f"Vui lòng chờ {resend_wait_seconds} giây trước khi gửi lại OTP.")
+        return redirect(f"{reverse('users:password_reset_verify')}?email={email}")
+
+    otp, raw_otp = issued_payload
+    try:
+        _send_password_reset_otp_email(user, raw_otp)
+        messages.success(request, "OTP mới đã được gửi tới email của bạn.")
+    except Exception:
+        otp.delete()
+        messages.error(request, "Không thể gửi lại OTP lúc này. Vui lòng thử lại sau.")
+
+    return redirect(f"{reverse('users:password_reset_verify')}?email={email}")
+
+
+def password_reset_confirm(request):
+    if request.user.is_authenticated:
+        return redirect("shops:index")
+
+    otp_id = request.session.get(PASSWORD_RESET_OTP_SESSION_KEY)
+    if not otp_id:
+        messages.error(request, "Phiên xác minh không hợp lệ. Vui lòng yêu cầu OTP mới.")
+        return redirect("users:password_reset")
+
+    otp = (
+        PasswordResetOTP.objects
+        .filter(id=otp_id, used=False)
+        .select_related("user")
+        .first()
+    )
+    if not otp or otp.is_expired():
+        if otp:
+            otp.used = True
+            otp.save(update_fields=["used"])
+        _clear_password_reset_session(request)
+        messages.error(request, "OTP đã hết hạn hoặc không còn hợp lệ. Vui lòng yêu cầu lại.")
+        return redirect("users:password_reset")
+
+    if request.method == "POST":
+        form = PasswordResetOTPSetPasswordForm(request.POST, user=otp.user)
+        if form.is_valid():
+            otp.user.set_password(form.cleaned_data["new_password1"])
+            otp.user.save(update_fields=["password"])
+            otp.used = True
+            otp.save(update_fields=["used"])
+            _clear_password_reset_session(request)
+            return redirect("users:password_reset_complete")
+    else:
+        form = PasswordResetOTPSetPasswordForm(user=otp.user)
+
+    return render(
+        request,
+        "users/password_reset_confirm.html",
+        {
+            "form": form,
+            "masked_email": _mask_email(otp.email),
+        },
+    )
+
+
+def password_reset_complete(request):
+    return render(request, "users/password_reset_complete.html")
 
 
 @login_required
@@ -178,22 +459,30 @@ def rewards(request):
         "expiring_24h" : expiring_24h,
         "expiring_72h" : expiring_72h,
         "recent_exchanges": request.user.point_exchanges.all()[:10],
-        "manage_voucher_options": (
-            RewardVoucherOption.objects.all().order_by("sort_order", "id")
-            if request.user.is_staff or request.user.is_superuser
-            else []
-        ),
-        
     }
     return render(request, "users/rewards.html", context)
 
 
 @login_required
+def reward_admin_console(request):
+    _require_reward_admin(request.user)
+
+    selected_box = request.GET.get("box", "standard").strip().lower()
+    if selected_box not in {"standard", "premium"}:
+        selected_box = "standard"
+
+    context = {
+        "selected_box_type": selected_box,
+        "voucher_options": RewardVoucherOption.objects.all().order_by("sort_order", "id"),
+        "mystery_rewards": MysteryBoxRewardOption.objects.all().order_by("box_tier", "sort_order", "id"),
+    }
+    return render(request, "users/reward_admin_console.html", context)
+
+
+@login_required
 @require_POST
 def manage_voucher_options(request):
-    if not (request.user.is_staff or request.user.is_superuser):
-        messages.error(request, "Bạn không có quyền chỉnh gói voucher.")
-        return redirect("users:rewards")
+    _require_reward_admin(request.user)
 
     action = request.POST.get("action", "").strip()
 
@@ -249,7 +538,7 @@ def manage_voucher_options(request):
     except Exception:
         messages.error(request, "Không thể lưu gói voucher. Vui lòng kiểm tra dữ liệu.")
 
-    return redirect("users:rewards")
+    return redirect("users:reward_admin_console")
 
 
 def _get_active_mystery_reward_pool(box_tier="STANDARD"):
@@ -270,6 +559,54 @@ def _get_active_mystery_reward_pool(box_tier="STANDARD"):
             "voucher_valid_days": row.voucher_valid_days,
         })
     return rewards
+
+
+def _get_box_reward_odds(box_tier):
+    pool = _get_active_mystery_reward_pool(box_tier)
+    total_weight = sum(item["weight"] for item in pool)
+    grouped_weights = {}
+    for item in pool:
+        grouped_weights[item["type"]] = grouped_weights.get(item["type"], 0) + item["weight"]
+
+    odds = []
+    for reward_type in ["POINTS", "PLAYS", "VOUCHER", "EMPTY"]:
+        weight = grouped_weights.get(reward_type, 0)
+        odds.append({
+            "type": reward_type,
+            "weight": weight,
+            "percent": (weight * 100 / total_weight) if total_weight else 0,
+        })
+    return odds
+
+
+def _get_box_pity_status(profile_obj, box_type):
+    config = MYSTERY_BOX_PITY_RULES[box_type]
+    misses = getattr(profile_obj, config["field"], 0)
+    threshold = config["threshold"]
+    guaranteed_in = max(0, threshold - misses)
+    return {
+        "misses": misses,
+        "threshold": threshold,
+        "guaranteed_in": guaranteed_in,
+        "progress_percent": min(100, int(misses * 100 / threshold)) if threshold else 0,
+        "box_label": config["label"],
+    }
+
+
+def _build_weighted_reward_pool(base_pool, pity_misses, threshold, boost_multiplier):
+    if not base_pool or pity_misses <= 0 or threshold <= 1:
+        return [dict(item) for item in base_pool]
+
+    weighted_pool = []
+    progress = min(pity_misses, threshold - 1) / (threshold - 1)
+    voucher_multiplier = 1 + (boost_multiplier - 1) * progress
+
+    for item in base_pool:
+        cloned = dict(item)
+        if cloned["type"] == "VOUCHER":
+            cloned["weight"] = max(1, int(round(cloned["weight"] * voucher_multiplier)))
+        weighted_pool.append(cloned)
+    return weighted_pool
 
 
 def _generate_mystery_board():
@@ -309,11 +646,8 @@ def minigame(request):
         "can_use_premium_box": can_use_premium_box,
         "selected_box_type": selected_box_type,
         "current_rank": profile_obj.rank,
-        "manage_rewards": (
-            MysteryBoxRewardOption.objects.all().order_by("sort_order", "id")
-            if request.user.is_staff or request.user.is_superuser
-            else []
-        ),
+        "reward_odds": _get_box_reward_odds("PREMIUM" if selected_box_type == "premium" else "STANDARD"),
+        "pity_status": _get_box_pity_status(profile_obj, selected_box_type),
     }
     return render(request, "users/minigame.html", context)
 
@@ -379,14 +713,24 @@ def open_mystery_box(request):
             return JsonResponse({"ok": False, "error": f"Ban can it nhat {open_count} luot choi."}, status=400)
 
         profile_obj.minigame_plays -= open_count
+        pity_config = MYSTERY_BOX_PITY_RULES[box_type]
+        pity_field = pity_config["field"]
+        pity_misses = getattr(profile_obj, pity_field, 0)
 
         # New board is generated per turn, then discarded after opening.
-        board = _get_active_mystery_reward_pool("PREMIUM" if box_type == "premium" else "STANDARD")
+        box_tier = "PREMIUM" if box_type == "premium" else "STANDARD"
+        board = _get_active_mystery_reward_pool(box_tier)
+        weighted_board = _build_weighted_reward_pool(
+            board,
+            pity_misses=pity_misses,
+            threshold=pity_config["threshold"],
+            boost_multiplier=pity_config["boost_multiplier"],
+        )
         if board:
-            weights = [item["weight"] for item in board]
+            weights = [item["weight"] for item in weighted_board]
             generated_board = []
             for _ in range(9):
-                generated_board.append(random.choices(board, weights=weights, k=1)[0])
+                generated_board.append(random.choices(weighted_board, weights=weights, k=1)[0])
             board = generated_board
         if not board:
             box_label = "Premium Box" if box_type == "premium" else "Standard Box"
@@ -395,10 +739,22 @@ def open_mystery_box(request):
         chosen_indexes = [clicked_index]
         if open_count > 1:
             chosen_indexes.extend(random.sample(remaining_indexes, k=open_count - 1))
+        pity_triggered = False
+        voucher_pool = [item for item in weighted_board if item["type"] == "VOUCHER"]
+        chosen_rewards = [board[idx] for idx in chosen_indexes]
+        guarantee_voucher = (
+            bool(voucher_pool)
+            and pity_misses + 1 >= pity_config["threshold"]
+            and not any(item["type"] == "VOUCHER" for item in chosen_rewards)
+        )
+        if guarantee_voucher:
+            voucher_weights = [item["weight"] for item in voucher_pool]
+            board[chosen_indexes[-1]] = random.choices(voucher_pool, weights=voucher_weights, k=1)[0]
+            chosen_rewards[-1] = board[chosen_indexes[-1]]
+            pity_triggered = True
         rewards = []
 
-        for idx in chosen_indexes:
-            reward = board[idx]
+        for idx, reward in zip(chosen_indexes, chosen_rewards):
             extra = _apply_mystery_reward(profile_obj, request.user, reward)
 
             label = reward["label"]
@@ -411,7 +767,12 @@ def open_mystery_box(request):
                 "type": reward["type"],
             })
 
-        profile_obj.save(update_fields=["points", "minigame_plays"])
+        if any(item["type"] == "VOUCHER" for item in chosen_rewards):
+            setattr(profile_obj, pity_field, 0)
+        else:
+            setattr(profile_obj, pity_field, pity_misses + 1)
+
+        profile_obj.save(update_fields=["points", "minigame_plays", pity_field])
         MysteryBoxHistory.objects.create(
             user=request.user,
             open_count=open_count,
@@ -423,15 +784,15 @@ def open_mystery_box(request):
         "rewards": rewards,
         "remaining_plays": profile_obj.minigame_plays,
         "opened_count": open_count,
+        "pity_triggered": pity_triggered,
+        "pity_status": _get_box_pity_status(profile_obj, box_type),
     })
 
 
 @login_required
 @require_POST
 def manage_mystery_rewards(request):
-    if not (request.user.is_staff or request.user.is_superuser):
-        messages.error(request, "Bạn không có quyền chỉnh quà Mystery Box.")
-        return redirect("users:minigame")
+    _require_reward_admin(request.user)
 
     action = request.POST.get("action", "").strip()
     selected_box = request.POST.get("selected_box_type", "standard").strip().lower()
@@ -507,7 +868,7 @@ def manage_mystery_rewards(request):
     except Exception:
         messages.error(request, "Không thể lưu phần quà. Vui lòng kiểm tra dữ liệu.")
 
-    return redirect(f"{reverse('users:minigame')}?box={selected_box}")
+    return redirect(f"{reverse('users:reward_admin_console')}?box={selected_box}")
 
 def get_next_rank_info(points):
 
@@ -688,5 +1049,3 @@ def get_rank_benefits(self):
     }
 
     return benefits.get(self.rank)
-
-

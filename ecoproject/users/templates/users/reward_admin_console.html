@@ -1,0 +1,243 @@
+{% extends "users/base.html" %}
+{% load humanize %}
+{% block title %}Reward Admin Console | QShop{% endblock %}
+{% block content %}
+<style>
+  .admin-shell {
+    border-radius: 20px;
+    background: linear-gradient(145deg, #ffffff, #f8fafc);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+    overflow: hidden;
+  }
+
+  .admin-header {
+    background: linear-gradient(120deg, #111827, #0f766e);
+    color: #fff;
+    padding: 28px;
+  }
+
+  .admin-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+  }
+
+  .section-title {
+    font-weight: 700;
+    margin-bottom: 0;
+  }
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="admin-shell">
+    <div class="admin-header d-flex justify-content-between align-items-start flex-wrap gap-3">
+      <div>
+        <h4 class="mb-2">Reward Admin Console</h4>
+        <p class="mb-0">Quản trị cấu hình voucher đổi điểm và phần quà Mystery Box tách biệt khỏi trang người dùng.</p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{% url 'users:rewards' %}" class="btn btn-light btn-sm">Trang đổi thưởng</a>
+        <a href="{% url 'users:minigame' %}?box={{ selected_box_type }}" class="btn btn-outline-light btn-sm">Trang minigame</a>
+        <a href="{% url 'admin:index' %}" class="btn btn-outline-light btn-sm">Django Admin</a>
+      </div>
+    </div>
+
+    <div class="p-4">
+      <div class="admin-card p-3 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h6 class="section-title">Gói voucher đổi điểm</h6>
+          <span class="text-muted small">{{ voucher_options|length }} cấu hình</span>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <div class="fw-semibold mb-2">Thêm gói voucher</div>
+          <form method="post" action="{% url 'users:manage_voucher_options' %}" class="row g-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <div class="col-lg-4">
+              <input class="form-control" name="name" placeholder="Tên gói voucher" required>
+            </div>
+            <div class="col-lg-2">
+              <input class="form-control" name="cost_points" type="number" min="1" placeholder="Điểm" required>
+            </div>
+            <div class="col-lg-1">
+              <input class="form-control" name="discount" type="number" min="1" max="100" placeholder="%">
+            </div>
+            <div class="col-lg-2">
+              <input class="form-control" name="max_discount" type="number" min="0" placeholder="Giảm tối đa">
+            </div>
+            <div class="col-lg-1">
+              <input class="form-control" name="valid_days" type="number" min="1" placeholder="Ngày">
+            </div>
+            <div class="col-lg-1">
+              <input class="form-control" name="sort_order" type="number" min="0" value="0">
+            </div>
+            <div class="col-lg-1 d-flex align-items-center">
+              <input class="form-check-input me-2" type="checkbox" name="active" checked>
+              <button class="btn btn-primary btn-sm">Thêm</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Tên</th>
+                <th>Điểm</th>
+                <th>%</th>
+                <th>Tối đa</th>
+                <th>Ngày</th>
+                <th>Sort</th>
+                <th>On</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for v in voucher_options %}
+              <tr>
+                <form method="post" action="{% url 'users:manage_voucher_options' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="option_id" value="{{ v.id }}">
+                  <td><input class="form-control form-control-sm" name="name" value="{{ v.name }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="1" name="cost_points" value="{{ v.cost_points }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="1" max="100" name="discount" value="{{ v.discount }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="max_discount" value="{{ v.max_discount }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="1" name="valid_days" value="{{ v.valid_days }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="sort_order" value="{{ v.sort_order }}"></td>
+                  <td><input class="form-check-input" type="checkbox" name="active" {% if v.active %}checked{% endif %}></td>
+                  <td class="d-flex gap-1">
+                    <button class="btn btn-sm btn-success" name="action" value="update">Lưu</button>
+                    <button class="btn btn-sm btn-outline-secondary" name="action" value="toggle">Bật/Tắt</button>
+                  </td>
+                </form>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="8" class="text-muted">Chưa có gói voucher nào.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+          <h6 class="section-title">Phần quà Mystery Box</h6>
+          <div class="d-flex gap-2">
+            <a
+              href="{% url 'users:reward_admin_console' %}?box=standard"
+              class="btn btn-sm {% if selected_box_type == 'standard' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+            >
+              Standard
+            </a>
+            <a
+              href="{% url 'users:reward_admin_console' %}?box=premium"
+              class="btn btn-sm {% if selected_box_type == 'premium' %}btn-warning{% else %}btn-outline-warning{% endif %}"
+            >
+              Premium
+            </a>
+          </div>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <div class="fw-semibold mb-2">Thêm phần quà</div>
+          <form method="post" action="{% url 'users:manage_mystery_rewards' %}" class="row g-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
+            <div class="col-lg-3">
+              <input class="form-control" name="name" placeholder="Tên quà" required>
+            </div>
+            <div class="col-lg-2">
+              <select class="form-select" name="box_tier">
+                <option value="STANDARD" {% if selected_box_type == 'standard' %}selected{% endif %}>STANDARD</option>
+                <option value="PREMIUM" {% if selected_box_type == 'premium' %}selected{% endif %}>PREMIUM</option>
+              </select>
+            </div>
+            <div class="col-lg-2">
+              <select class="form-select" name="reward_type">
+                <option value="POINTS">POINTS</option>
+                <option value="PLAYS">PLAYS</option>
+                <option value="VOUCHER">VOUCHER</option>
+                <option value="EMPTY">EMPTY</option>
+              </select>
+            </div>
+            <div class="col-lg-1"><input class="form-control" name="points_value" type="number" min="0" placeholder="P"></div>
+            <div class="col-lg-1"><input class="form-control" name="plays_value" type="number" min="0" placeholder="L"></div>
+            <div class="col-lg-1"><input class="form-control" name="voucher_discount" type="number" min="0" placeholder="%"></div>
+            <div class="col-lg-1"><input class="form-control" name="weight" type="number" min="1" value="1"></div>
+            <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
+          </form>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Tên</th>
+                <th>Box</th>
+                <th>Type</th>
+                <th>P</th>
+                <th>L</th>
+                <th>%</th>
+                <th>Max</th>
+                <th>Ngày</th>
+                <th>W</th>
+                <th>Sort</th>
+                <th>On</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in mystery_rewards %}
+              {% if r.box_tier|lower == selected_box_type %}
+              <tr>
+                <form method="post" action="{% url 'users:manage_mystery_rewards' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="reward_id" value="{{ r.id }}">
+                  <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
+                  <td><input class="form-control form-control-sm" name="name" value="{{ r.name }}"></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="box_tier">
+                      <option value="STANDARD" {% if r.box_tier == "STANDARD" %}selected{% endif %}>STANDARD</option>
+                      <option value="PREMIUM" {% if r.box_tier == "PREMIUM" %}selected{% endif %}>PREMIUM</option>
+                    </select>
+                  </td>
+                  <td>
+                    <select class="form-select form-select-sm" name="reward_type">
+                      <option value="POINTS" {% if r.reward_type == "POINTS" %}selected{% endif %}>POINTS</option>
+                      <option value="PLAYS" {% if r.reward_type == "PLAYS" %}selected{% endif %}>PLAYS</option>
+                      <option value="VOUCHER" {% if r.reward_type == "VOUCHER" %}selected{% endif %}>VOUCHER</option>
+                      <option value="EMPTY" {% if r.reward_type == "EMPTY" %}selected{% endif %}>EMPTY</option>
+                    </select>
+                  </td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="points_value" value="{{ r.points_value }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="plays_value" value="{{ r.plays_value }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_discount" value="{{ r.voucher_discount }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_max_discount" value="{{ r.voucher_max_discount }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_valid_days" value="{{ r.voucher_valid_days }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="1" name="weight" value="{{ r.weight }}"></td>
+                  <td><input class="form-control form-control-sm" type="number" min="0" name="sort_order" value="{{ r.sort_order }}"></td>
+                  <td><input class="form-check-input" type="checkbox" name="active" {% if r.active %}checked{% endif %}></td>
+                  <td class="d-flex gap-1">
+                    <button class="btn btn-sm btn-success" name="action" value="update">Lưu</button>
+                    <button class="btn btn-sm btn-outline-secondary" name="action" value="toggle">Bật/Tắt</button>
+                  </td>
+                </form>
+              </tr>
+              {% endif %}
+              {% empty %}
+              <tr>
+                <td colspan="12" class="text-muted">Chưa có phần quà nào.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

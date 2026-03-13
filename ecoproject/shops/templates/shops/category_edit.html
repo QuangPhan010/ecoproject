@@ -63,6 +63,19 @@ input.form-control:focus{
         >
       </div>
 
+      <div class="form-check mb-3">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          name="is_active"
+          id="category-active"
+          {% if category.is_active %}checked{% endif %}
+        >
+        <label class="form-check-label" for="category-active">
+          Hiển thị danh mục và toàn bộ sản phẩm thuộc danh mục này
+        </label>
+      </div>
+
       <hr class="my-4">
 
       <div class="d-flex justify-content-between">

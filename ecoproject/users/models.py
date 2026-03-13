@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
+from datetime import timedelta
 
 
 # Create your models here.
@@ -19,6 +21,10 @@ class Profile(models.Model):
     lifetime_points = models.IntegerField(default=0)
     # Play credits exchanged from points.
     minigame_plays = models.IntegerField(default=0)
+    # Consecutive Standard Box turns without drawing a voucher.
+    standard_voucher_pity = models.PositiveSmallIntegerField(default=0)
+    # Consecutive Premium Box turns without drawing a voucher.
+    premium_voucher_pity = models.PositiveSmallIntegerField(default=0)
 
     RANK_NEWBIE = "Newbie"
     RANK_EXPLORER = "Explorer"
@@ -247,3 +253,35 @@ class MysteryBoxRewardOption(models.Model):
 
     def __str__(self):
         return f"{self.name} [{self.box_tier}] ({self.reward_type}, w={self.weight})"
+
+
+class PasswordResetOTP(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="password_reset_otps",
+    )
+    email = models.EmailField()
+    code = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["email", "-created_at"]),
+            models.Index(fields=["user", "used", "-created_at"]),
+        ]
+
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def resend_available_in(self, cooldown_seconds=60):
+        elapsed = (timezone.now() - self.created_at).total_seconds()
+        return max(0, int(cooldown_seconds - elapsed))
+
+    @classmethod
+    def build_expiry(cls, minutes=10):
+        return timezone.now() + timedelta(minutes=minutes)

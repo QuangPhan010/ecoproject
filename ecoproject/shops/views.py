@@ -10,9 +10,8 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog
-from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm
-from users.forms import ProfileEditForm
+from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog, AfterSalesRequest
+from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm, CheckoutForm, AfterSalesRequestForm, AfterSalesRequestUpdateForm
 from .color_map import COLOR_MAP
 from django.utils import timezone
 from django.conf import settings
@@ -29,9 +28,10 @@ import base64
 import logging
 import random
 from .utils.shipping import calculate_shipping_cost
-from django.db.models.functions import TruncMonth, TruncDay, TruncHour
+from django.db.models.functions import Coalesce, TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
 from shops.discount_utils import calculate_rank_discount
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -50,6 +50,14 @@ except Exception:
     renderSVG = None
 
 logger = logging.getLogger(__name__)
+
+
+def _public_product_visibility_filter():
+    return Q(category__isnull=True) | Q(category__is_active=True)
+
+
+def _public_products_qs():
+    return Product.objects.filter(available=True).filter(_public_product_visibility_filter())
 
 
 def _build_qr_svg_data_uri(value, size=120):
@@ -81,6 +89,49 @@ def _available_stock(product):
     return max(product.stock - product.reserved_stock, 0)
 
 
+def _get_cart_stock_error(cart):
+    product_ids = [int(pid) for pid in cart.keys() if str(pid).isdigit()]
+    if not product_ids:
+        return None
+
+    products = (
+        _public_products_qs()
+        .only("id", "name", "stock", "reserved_stock")
+        .filter(id__in=product_ids)
+    )
+    product_map = {str(product.id): product for product in products}
+
+    for product_id, item in cart.items():
+        product = product_map.get(str(product_id))
+        if not product:
+            return "Một số sản phẩm trong giỏ hàng không còn khả dụng."
+
+        qty = int(item.get("quantity", 0))
+        available_stock = _available_stock(product)
+        if qty <= 0:
+            return f"Số lượng của '{product.name}' không hợp lệ."
+        if qty > available_stock:
+            return f"{product.name} chỉ còn {available_stock} sản phẩm."
+
+    return None
+
+
+def _build_cart_response_payload(cart):
+    total_price = 0
+    cart_items_count = len(cart)
+
+    for item in cart.values():
+        item_total = item["quantity"] * item["price"]
+        item["total"] = item_total
+        total_price += item_total
+
+    return {
+        "cart": cart,
+        "total_price": total_price,
+        "cart_items_count": cart_items_count,
+    }
+
+
 def _pick_random_products(qs, limit, max_pool=500):
     ids = list(qs.order_by("-id").values_list("id", flat=True)[:max_pool])
     if not ids:
@@ -98,9 +149,14 @@ def _get_coupon_discount(request, cart, subtotal, subtotal_after_rank):
     if not coupon_id:
         return coupon, coupon_discount
 
+    if not request.user.is_authenticated:
+        request.session.pop("coupon_id", None)
+        return None, 0
+
     try:
         coupon = Coupon.objects.get(id=coupon_id)
-        if coupon.owner_id and coupon.owner_id != request.user.id:
+        current_user_id = request.user.id if request.user.is_authenticated else None
+        if coupon.owner_id and coupon.owner_id != current_user_id:
             request.session.pop("coupon_id", None)
             return None, 0
 
@@ -129,7 +185,7 @@ def _get_coupon_discount(request, cart, subtotal, subtotal_after_rank):
     except (ValueError, TypeError, KeyError) as exc:
         logger.warning(
             "Coupon calculation failed. user_id=%s coupon_id=%s error=%s",
-            request.user.id,
+            request.user.id if request.user.is_authenticated else None,
             coupon_id,
             exc,
         )
@@ -166,8 +222,8 @@ def calculate_checkout_totals(request, address=""):
 # ================= HOME =================
 
 def index(request):
-    featured_products = Product.objects.filter(available=True).order_by('-id')[:8]
-    flash_base_qs = Product.objects.filter(available=True, stock__gt=F("reserved_stock"))
+    featured_products = _public_products_qs().order_by('-id')[:8]
+    flash_base_qs = _public_products_qs().filter(stock__gt=F("reserved_stock"))
     flash_products = _pick_random_products(flash_base_qs, 4)
     now = timezone.now()
     flash_sale = FlashSale.objects.filter(is_active=True, start_time__lte=now,end_time__gte=now).first()    
@@ -190,7 +246,7 @@ def product(request):
     search_query = request.GET.get("q", "").strip()
     sort = request.GET.get("sort", "newest").strip()
 
-    products = Product.objects.filter(available=True).select_related("category")
+    products = _public_products_qs().select_related("category")
 
     if category_slug:
         products = products.filter(category__slug=category_slug)
@@ -233,7 +289,7 @@ def product(request):
     query_params.pop("page", None)
     base_query = query_params.urlencode()
 
-    categories = Category.objects.all()
+    categories = Category.objects.filter(is_active=True)
 
     return render(request, 'shops/product.html', {
         'products': page_obj.object_list,
@@ -249,7 +305,7 @@ def product(request):
 # ================= PRODUCT DETAIL =================
 
 def detail(request, slug):
-    product = get_object_or_404(Product, slug=slug, available=True)
+    product = get_object_or_404(_public_products_qs(), slug=slug)
 
     reviews = product.reviews.filter(parent__isnull=True)
     review_form = ReviewForm()
@@ -268,8 +324,8 @@ def detail(request, slug):
     rating_count = product.rating_count()
 
     preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(viewed)])
-    viewed_products = Product.objects.filter(id__in=viewed).order_by(preserved)
-    suggest_base_qs = Product.objects.filter(available=True).exclude(id=product.id)
+    viewed_products = _public_products_qs().filter(id__in=viewed).order_by(preserved)
+    suggest_base_qs = _public_products_qs().exclude(id=product.id)
     suggest_products = _pick_random_products(suggest_base_qs, 6)
     compare_ids = [int(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
     is_in_compare = product.id in compare_ids
@@ -295,7 +351,7 @@ def detail(request, slug):
 @login_required
 def add_review(request, slug):
     if request.method == "POST":
-        product = get_object_or_404(Product, slug=slug)
+        product = get_object_or_404(_public_products_qs(), slug=slug)
         content = request.POST.get("content")
         rating = request.POST.get("rating", 5)
         parent_id = request.POST.get("parent_id")
@@ -384,7 +440,7 @@ def delete_review(request, id):
 # ================= CART =================
 
 def add_to_cart(request, product_id):
-    product = get_object_or_404(Product, id=product_id)
+    product = get_object_or_404(_public_products_qs(), id=product_id)
     available_stock = _available_stock(product)
 
     if available_stock <= 0:
@@ -419,12 +475,15 @@ def add_to_cart(request, product_id):
 
 def cart_detail(request):
     cart = request.session.get('cart', {})
-    total_price = 0
     for item_id, item in cart.items():
-        item['total'] = item['quantity'] * item['price']
-        total_price += item['total']
-    
-    return render(request, 'shops/cart_detail.html', {'cart': cart, 'total_price': total_price})
+        try:
+            product = _public_products_qs().only("stock", "reserved_stock").get(id=item_id)
+            item["available_stock"] = _available_stock(product)
+        except Product.DoesNotExist:
+            item["available_stock"] = 0
+
+    context = _build_cart_response_payload(cart)
+    return render(request, 'shops/cart_detail.html', context)
 
 def remove_from_cart(request, product_id):
     cart = request.session.get('cart', {})
@@ -439,21 +498,83 @@ def remove_from_cart(request, product_id):
 def update_cart(request, product_id):
     cart = request.session.get('cart', {})
     product_id_str = str(product_id)
-    quantity = int(request.POST.get('quantity', 1))
+    is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+
+    try:
+        quantity = int(request.POST.get('quantity', 1))
+    except (TypeError, ValueError):
+        error_message = "Số lượng không hợp lệ."
+        if is_ajax:
+            return JsonResponse({"status": "error", "message": error_message}, status=400)
+        messages.error(request, error_message)
+        return redirect('shops:cart_detail')
 
     if product_id_str in cart:
         if quantity > 0:
+            try:
+                product = _public_products_qs().only("id", "name", "stock", "reserved_stock").get(id=product_id)
+            except Product.DoesNotExist:
+                error_message = "Sản phẩm không còn khả dụng."
+                if is_ajax:
+                    del cart[product_id_str]
+                    request.session['cart'] = cart
+                    payload = _build_cart_response_payload(cart)
+                    payload.update({"status": "error", "message": error_message})
+                    return JsonResponse(payload, status=404)
+                messages.error(request, error_message)
+                del cart[product_id_str]
+                request.session['cart'] = cart
+                return redirect('shops:cart_detail')
+
+            available_stock = _available_stock(product)
+            if quantity > available_stock:
+                error_message = f"{product.name} chỉ còn {available_stock} sản phẩm."
+                if is_ajax:
+                    item = cart[product_id_str]
+                    item_total = item["quantity"] * item["price"]
+                    return JsonResponse({
+                        "status": "error",
+                        "message": error_message,
+                        "quantity": item["quantity"],
+                        "available_stock": available_stock,
+                        "item_total": item_total,
+                        "total_price": sum(entry["quantity"] * entry["price"] for entry in cart.values()),
+                        "cart_items_count": len(cart),
+                    }, status=400)
+                messages.error(request, error_message)
+                return redirect('shops:cart_detail')
+
             cart[product_id_str]['quantity'] = quantity
         else:
             del cart[product_id_str]
         request.session['cart'] = cart
-        
+
+        if is_ajax:
+            item = cart.get(product_id_str)
+            payload = _build_cart_response_payload(cart)
+            payload.update({"status": "success"})
+            if item:
+                try:
+                    product = _public_products_qs().only("stock", "reserved_stock").get(id=product_id)
+                    available_stock = _available_stock(product)
+                except Product.DoesNotExist:
+                    available_stock = 0
+                payload.update({
+                    "quantity": item["quantity"],
+                    "available_stock": available_stock,
+                    "item_total": item["total"],
+                })
+            return JsonResponse(payload)
+
+    if is_ajax:
+        return JsonResponse({"status": "error", "message": "Sản phẩm không có trong giỏ hàng."}, status=404)
+
     return redirect('shops:cart_detail')
 
 
 @require_POST
 def buy_now(request, product_id):
-    product = get_object_or_404(Product, id=product_id, available=True)
+    product = get_object_or_404(_public_products_qs(), id=product_id)
     available_stock = _available_stock(product)
 
     if available_stock <= 0:
@@ -485,7 +606,7 @@ def buy_now(request, product_id):
 @login_required
 @require_POST
 def toggle_wishlist(request, product_id):
-    product = get_object_or_404(Product, id=product_id, available=True)
+    product = get_object_or_404(_public_products_qs(), id=product_id)
     next_url = request.POST.get("next") or reverse("shops:detail", args=[product.slug])
 
     item = WishlistItem.objects.filter(user=request.user, product=product).first()
@@ -505,14 +626,15 @@ def wishlist(request):
     wishlist_items = (
         WishlistItem.objects
         .filter(user=request.user)
-        .select_related("product")
+        .select_related("product", "product__category")
+        .filter(Q(product__category__isnull=True) | Q(product__category__is_active=True))
     )
     return render(request, "shops/wishlist.html", {"wishlist_items": wishlist_items})
 
 
 @require_POST
 def compare_add(request, product_id):
-    product = get_object_or_404(Product, id=product_id, available=True)
+    product = get_object_or_404(_public_products_qs(), id=product_id)
     next_url = request.POST.get("next") or reverse("shops:detail", args=[product.slug])
 
     compare_ids = [str(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
@@ -554,7 +676,7 @@ def compare(request):
     compare_ids = [int(pid) for pid in request.session.get("compare_products", []) if str(pid).isdigit()]
     compare_ids = compare_ids[:4]
 
-    products = Product.objects.filter(id__in=compare_ids, available=True)
+    products = _public_products_qs().filter(id__in=compare_ids)
     if compare_ids:
         preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(compare_ids)])
         products = products.order_by(preserved)
@@ -565,7 +687,6 @@ def compare(request):
         "can_compare": products.count() >= 2,
     })
 
-@login_required
 def checkout(request):
     totals = calculate_checkout_totals(request, address="")
     cart = totals["cart"]
@@ -574,11 +695,16 @@ def checkout(request):
         messages.warning(request, "Giỏ hàng trống.")
         return redirect("shops:product")
 
+    stock_error = _get_cart_stock_error(cart)
+    if stock_error:
+        messages.error(request, stock_error)
+        return redirect("shops:cart_detail")
+
     # ===== FORM =====
 
-    profile_form = ProfileEditForm(
+    checkout_form = CheckoutForm(
         request.POST or None,
-        instance=request.user.profile
+        user=request.user,
     )
     coupon_form = CouponForm()
     payment_choices = {code for code, _ in Order.PAYMENT_CHOICES}
@@ -592,11 +718,16 @@ def checkout(request):
 
         action = request.POST.get("action")
 
-        if profile_form.is_valid():
+        if checkout_form.is_valid():
 
-            address = profile_form.cleaned_data["address"]
+            address = checkout_form.cleaned_data["address"]
 
             totals = calculate_checkout_totals(request, address=address)
+            cart = totals["cart"]
+            stock_error = _get_cart_stock_error(cart)
+            if stock_error:
+                messages.error(request, stock_error)
+                return redirect("shops:cart_detail")
 
             # ===== PLACE ORDER =====
 
@@ -604,7 +735,12 @@ def checkout(request):
                 try:
                     with transaction.atomic():
                         product_ids = [int(pid) for pid in cart.keys()]
-                        products = Product.objects.select_for_update().filter(id__in=product_ids)
+                        products = (
+                            Product.objects
+                            .select_for_update()
+                            .filter(id__in=product_ids)
+                            .filter(_public_product_visibility_filter())
+                        )
                         product_map = {str(product.id): product for product in products}
 
                         # Reserve stock on order creation to prevent oversell.
@@ -624,9 +760,11 @@ def checkout(request):
                                 )
 
                         order = Order.objects.create(
-                            user=request.user,
+                            user=request.user if request.user.is_authenticated else None,
+                            guest_name=checkout_form.cleaned_data["full_name"],
+                            guest_email=checkout_form.cleaned_data["email"],
                             address=address,
-                            phone=profile_form.cleaned_data["phone"],
+                            phone=checkout_form.cleaned_data["phone"],
                             total_price=totals["final_total"],
                             shipping_cost=totals["shipping_cost"],
                             rank_discount=totals["rank_discount"],
@@ -656,14 +794,26 @@ def checkout(request):
                             product.save(update_fields=["reserved_stock"])
 
                         if totals["coupon"]:
-                            CouponUsage.objects.get_or_create(
-                                coupon=totals["coupon"],
-                                user=request.user
-                            )
+                            if request.user.is_authenticated:
+                                CouponUsage.objects.get_or_create(
+                                    coupon=totals["coupon"],
+                                    user=request.user
+                                )
 
                 except ValueError as exc:
                     messages.error(request, str(exc))
                     return redirect("shops:checkout")
+
+                if request.user.is_authenticated and request.POST.get("save_address"):
+                    profile = getattr(request.user, "profile", None)
+                    if profile:
+                        profile.phone = checkout_form.cleaned_data["phone"]
+                        profile.address = address
+                        profile.save(update_fields=["phone", "address"])
+
+                    if checkout_form.cleaned_data["email"] and request.user.email != checkout_form.cleaned_data["email"]:
+                        request.user.email = checkout_form.cleaned_data["email"]
+                        request.user.save(update_fields=["email"])
 
                 # clear cart
                 request.session.pop("cart", None)
@@ -701,7 +851,7 @@ def checkout(request):
 
         "final_total": totals["final_total"],
 
-        "profile_form": profile_form,
+        "checkout_form": checkout_form,
         "coupon_form": coupon_form,
         "selected_payment": selected_payment,
     }
@@ -711,7 +861,6 @@ def checkout(request):
         "shops/checkout.html",
         context
     )
-@login_required
 def checkout_preview_api(request):
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
@@ -724,7 +873,6 @@ def checkout_preview_api(request):
         "final_total": totals["final_total"],
     })
 
-@login_required
 def checkout_summary_api(request):
     address = request.GET.get("address", "")
     totals = calculate_checkout_totals(request, address=address)
@@ -738,11 +886,12 @@ def checkout_summary_api(request):
     })
 
 def _send_order_email(order, request):
-    if not order.user.email:
+    customer_email = order.customer_email
+    if not customer_email:
         return
 
     base_url = getattr(settings, "PUBLIC_BASE_URL", "").rstrip("/")
-    history_path = reverse('shops:order_history')
+    history_path = reverse('shops:order_qr_public', args=[order.qr_token])
     if base_url:
         order_history_url = f"{base_url}{history_path}"
     else:
@@ -764,22 +913,26 @@ def _send_order_email(order, request):
         subject=subject,
         body=text_content,
         from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[order.user.email],
+        to=[customer_email],
     )
     email.attach_alternative(html_content, "text/html")
     email.send(fail_silently=True)
 
-@login_required
 def bank_transfer(request):
     order_id = request.session.get('order_id')
-    order = get_object_or_404(Order, id=order_id, user=request.user)
-    return render(request, 'shops/bank_transfer.html', {'order': order})
+    order = get_object_or_404(Order, id=order_id)
+    return render(request, 'shops/bank_transfer.html', {
+        'order': order,
+        'order_tracking_url': reverse('shops:order_qr_public', args=[order.qr_token]),
+    })
 
-@login_required
 def order_created(request):
     order_id = request.session.get('order_id')
     order = get_object_or_404(Order, id=order_id)
-    return render(request, 'shops/order_created.html', {'order': order})
+    return render(request, 'shops/order_created.html', {
+        'order': order,
+        'order_tracking_url': reverse('shops:order_qr_public', args=[order.qr_token]),
+    })
 
 @login_required
 def order_history(request):
@@ -853,6 +1006,7 @@ def order_history(request):
         'is_admin': is_admin,
         'customers': (
             Order.objects.select_related('user')
+            .exclude(user__isnull=True)
             .values('user_id', 'user__username', 'user__email', 'user__first_name', 'user__last_name')
             .distinct()
             .order_by('user__username')
@@ -862,6 +1016,38 @@ def order_history(request):
         'selected_customer': selected_customer,
         'selected_status': selected_status,
         'export_query': export_query,
+    })
+
+
+@login_required
+def order_detail(request, order_id):
+    order = get_object_or_404(
+        Order.objects.select_related("user", "coupon").prefetch_related("items__product", "status_logs__changed_by", "after_sales_requests__requested_by", "after_sales_requests__processed_by"),
+        id=order_id,
+    )
+    if not _can_view_order(request, order):
+        return HttpResponseForbidden("Bạn không có quyền xem đơn hàng này.")
+
+    base_url = getattr(settings, "PUBLIC_BASE_URL", "").rstrip("/")
+    path = reverse("shops:order_qr_public", args=[order.qr_token])
+    if base_url:
+        qr_shipper_url = f"{base_url}{path}"
+    else:
+        qr_shipper_url = request.build_absolute_uri(path)
+
+    after_sales_requests = order.after_sales_requests.all()
+    after_sales_form = None
+    if not (request.user.is_staff or request.user.is_superuser) and _can_create_after_sales_request(order):
+        after_sales_form = AfterSalesRequestForm(order=order)
+
+    return render(request, "shops/order_detail.html", {
+        "order": order,
+        "status_logs": order.status_logs.all(),
+        "is_admin": request.user.is_staff or request.user.is_superuser,
+        "qr_shipper_url": qr_shipper_url,
+        "after_sales_requests": after_sales_requests,
+        "after_sales_form": after_sales_form,
+        "can_create_after_sales_request": _can_create_after_sales_request(order),
     })
 
 
@@ -988,7 +1174,7 @@ def _apply_status_change(order, new_status, changed_by=None, source="system"):
                 source=source,
             )
 
-        if old_status != "Delivered" and new_status == "Delivered":
+        if old_status != "Delivered" and new_status == "Delivered" and locked_order.user_id:
             update_user_rank(locked_order.user)
 
         order.status = locked_order.status
@@ -1066,8 +1252,13 @@ def admin_bulk_update_order_status(request):
 @require_POST
 def cancel_order(request, order_id):
     order = get_object_or_404(Order, id=order_id, user=request.user)
+    cancel_reason = request.POST.get("cancel_reason", "").strip()
 
     if order.status not in ["Pending", "Processing"]:
+        return redirect('shops:order_history')
+
+    if not cancel_reason:
+        messages.error(request, f"Vui lòng nhập lý do hủy đơn #{order.id}.")
         return redirect('shops:order_history')
 
     ok, error_msg = _apply_status_change(
@@ -1078,14 +1269,75 @@ def cancel_order(request, order_id):
     )
     if not ok:
         messages.error(request, f"Không thể huỷ đơn #{order.id}: {error_msg}")
+    else:
+        order.cancel_reason = cancel_reason
+        order.save(update_fields=["cancel_reason", "updated_at"])
+        messages.success(request, f"Đã huỷ đơn #{order.id}.")
 
     return redirect('shops:order_history')
+
+
+@login_required
+@require_POST
+def create_after_sales_request(request, order_id):
+    order = get_object_or_404(Order.objects.select_related("user"), id=order_id)
+    if not _can_manage_after_sales(request, order):
+        return HttpResponseForbidden("Bạn không có quyền thao tác với đơn hàng này.")
+    if not _can_create_after_sales_request(order):
+        messages.error(request, "Chỉ có thể gửi yêu cầu sau khi đơn hàng đã hoàn thành.")
+        return redirect("shops:order_detail", order_id=order.id)
+
+    form = AfterSalesRequestForm(request.POST, order=order)
+    if form.is_valid():
+        after_sales_request = form.save(commit=False)
+        after_sales_request.order = order
+        after_sales_request.requested_by = request.user
+        after_sales_request.save()
+        messages.success(request, "Đã gửi yêu cầu đổi/trả/hoàn tiền.")
+    else:
+        messages.error(request, "Thông tin yêu cầu hậu mãi chưa hợp lệ.")
+
+    return redirect("shops:order_detail", order_id=order.id)
+
+
+@login_required
+@require_POST
+def update_after_sales_request(request, request_id):
+    after_sales_request = get_object_or_404(
+        AfterSalesRequest.objects.select_related("order"),
+        id=request_id,
+    )
+    if not (request.user.is_staff or request.user.is_superuser):
+        return HttpResponseForbidden("Bạn không có quyền thực hiện.")
+
+    form = AfterSalesRequestUpdateForm(request.POST, instance=after_sales_request)
+    if form.is_valid():
+        record = form.save(commit=False)
+        record.processed_by = request.user
+        record.processed_at = timezone.now()
+        record.save()
+        messages.success(request, f"Đã cập nhật yêu cầu #{record.id}.")
+    else:
+        messages.error(request, f"Không thể cập nhật yêu cầu #{after_sales_request.id}.")
+
+    return redirect("shops:order_detail", order_id=after_sales_request.order_id)
 
 def _can_view_order(request, order):
     return (
         request.user.is_authenticated and
         (request.user.is_staff or request.user.is_superuser or order.user_id == request.user.id)
     )
+
+
+def _can_manage_after_sales(request, order):
+    return (
+        request.user.is_authenticated and
+        (request.user.is_staff or request.user.is_superuser or order.user_id == request.user.id)
+    )
+
+
+def _can_create_after_sales_request(order):
+    return order.status == "Delivered"
 
 
 def _mask_phone(phone):
@@ -1165,7 +1417,7 @@ def order_qr_public(request, token):
         else:
             error_message = error_msg or "Không thể cập nhật trạng thái đơn hàng."
 
-    receiver_name = order.user.get_full_name() or order.user.username
+    receiver_name = order.customer_name
     show_sensitive = can_mark_shipped
 
     return render(request, 'shops/order_qr_shipper.html', {
@@ -1274,7 +1526,7 @@ def _render_order_invoice(pdf, order, show_price, request, base_font, bold_font)
     pdf.drawString(left, y, "Thông tin giao hàng")
     y -= 16
     pdf.setFont(base_font, 10)
-    pdf.drawString(left, y, f"Người nhận: {order.user.get_full_name() or order.user.username}")
+    pdf.drawString(left, y, f"Người nhận: {order.customer_name}")
     y -= 14
     pdf.drawString(left, y, f"SDT: {order.phone}")
     y -= 14
@@ -1392,7 +1644,7 @@ def _render_shipper_invoice(pdf, order, request, base_font, bold_font):
     pdf.drawString(left, y, "Thông tin giao hàng")
     y -= 16
     pdf.setFont(base_font, 10)
-    pdf.drawString(left, y, f"Người nhận: {order.user.get_full_name() or order.user.username}")
+    pdf.drawString(left, y, f"Người nhận: {order.customer_name}")
     y -= 14
     pdf.drawString(left, y, f"SDT: {order.phone}")
     y -= 14
@@ -1508,6 +1760,70 @@ def order_bills_all_pdf(request):
     return response
 
 
+@login_required
+def order_xml_export(request, order_id):
+    order = get_object_or_404(
+        Order.objects.select_related("user", "coupon").prefetch_related("items__product", "after_sales_requests__processed_by"),
+        id=order_id,
+    )
+    if not _can_view_order(request, order):
+        return HttpResponseForbidden("Bạn không có quyền xem đơn hàng này.")
+
+    root = Element("order")
+    root.set("id", str(order.id))
+    root.set("status", order.status)
+    root.set("paid", str(order.paid).lower())
+    root.set("created_at", order.created_at.isoformat())
+    root.set("updated_at", order.updated_at.isoformat())
+
+    customer = SubElement(root, "customer")
+    SubElement(customer, "name").text = order.customer_name
+    SubElement(customer, "email").text = order.customer_email or ""
+    SubElement(customer, "phone").text = order.phone
+    SubElement(customer, "address").text = order.address
+
+    payment = SubElement(root, "payment")
+    SubElement(payment, "method").text = order.payment_method
+    SubElement(payment, "method_label").text = order.get_payment_method_display()
+    SubElement(payment, "shipping_cost").text = str(order.shipping_cost)
+    SubElement(payment, "rank_discount").text = str(order.rank_discount)
+    SubElement(payment, "coupon_discount").text = str(order.discount)
+    SubElement(payment, "total_price").text = str(order.total_price)
+    SubElement(payment, "coupon_code").text = order.coupon.code if order.coupon_id else ""
+
+    items_el = SubElement(root, "items")
+    for item in order.items.all():
+        item_el = SubElement(items_el, "item")
+        item_el.set("product_id", str(item.product_id))
+        SubElement(item_el, "name").text = item.product.name
+        SubElement(item_el, "quantity").text = str(item.quantity)
+        SubElement(item_el, "price").text = str(item.price)
+        SubElement(item_el, "line_total").text = str(item.total_cost)
+
+    after_sales_el = SubElement(root, "after_sales_requests")
+    for record in order.after_sales_requests.all():
+        record_el = SubElement(after_sales_el, "request")
+        record_el.set("id", str(record.id))
+        SubElement(record_el, "type").text = record.request_type
+        SubElement(record_el, "type_label").text = record.get_request_type_display()
+        SubElement(record_el, "status").text = record.status
+        SubElement(record_el, "status_label").text = record.get_status_display()
+        SubElement(record_el, "reason").text = record.reason
+        SubElement(record_el, "contact_name").text = record.contact_name
+        SubElement(record_el, "contact_email").text = record.contact_email
+        SubElement(record_el, "contact_phone").text = record.contact_phone
+        SubElement(record_el, "refund_amount").text = str(record.refund_amount)
+        SubElement(record_el, "resolution_note").text = record.resolution_note
+        SubElement(record_el, "created_at").text = record.created_at.isoformat()
+        SubElement(record_el, "processed_at").text = record.processed_at.isoformat() if record.processed_at else ""
+        SubElement(record_el, "processed_by").text = record.processed_by.username if record.processed_by_id else ""
+
+    xml_bytes = tostring(root, encoding="utf-8", xml_declaration=True)
+    response = HttpResponse(xml_bytes, content_type="application/xml; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="order_{order.id}.xml"'
+    return response
+
+
 
 # ================= CATEGORY MANAGE =================
 
@@ -1528,7 +1844,10 @@ def category_create(request):
         if name:
             Category.objects.get_or_create(
                 name=name,
-                defaults={'slug': slugify(name)}
+                defaults={
+                    'slug': slugify(name),
+                    'is_active': bool(request.POST.get("is_active")),
+                }
             )
     return redirect('shops:category_manage')
 
@@ -1542,12 +1861,23 @@ def category_edit(request, id):
         if name:
             category.name = name
             category.slug = slugify(name)
+            category.is_active = bool(request.POST.get("is_active"))
             category.save()
             return redirect('shops:category_manage')
 
     return render(request, 'shops/category_edit.html', {
         'category': category
     })
+
+
+@login_required
+@permission_required('shops.change_category', raise_exception=True)
+@require_POST
+def category_toggle(request, id):
+    category = get_object_or_404(Category, id=id)
+    category.is_active = not category.is_active
+    category.save(update_fields=["is_active"])
+    return redirect('shops:category_manage')
 
 @login_required
 @permission_required('shops.delete_category', raise_exception=True)
@@ -1568,7 +1898,7 @@ def category_delete(request, id):
 @login_required
 @permission_required('shops.add_product', raise_exception=True)
 def product_create(request):
-    categories = Category.objects.all()
+    categories = Category.objects.filter(is_active=True)
 
     if request.method == 'POST':
         form = ProductForm(request.POST)
@@ -1622,7 +1952,7 @@ def product_create(request):
 @permission_required('shops.change_product', raise_exception=True)
 def product_edit(request, slug):
     product = get_object_or_404(Product, slug=slug)
-    categories = Category.objects.all()
+    categories = Category.objects.filter(Q(is_active=True) | Q(id=product.category_id)).distinct()
 
     if request.method == 'POST':
         form = ProductForm(request.POST, instance=product)
@@ -1694,9 +2024,13 @@ def create_coupon(request):
 
 from .models import CouponUsage
 
-@login_required
 @require_POST
 def apply_coupon(request):
+    if not request.user.is_authenticated:
+        request.session.pop("coupon_id", None)
+        messages.warning(request, "Vui lòng đăng nhập để sử dụng voucher.")
+        return redirect('shops:checkout')
+
     form = CouponForm(request.POST)
     if form.is_valid():
         code = form.cleaned_data['code']
@@ -1710,7 +2044,8 @@ def apply_coupon(request):
                 active=True
             )
 
-            if coupon.owner_id and coupon.owner_id != request.user.id:
+            current_user_id = request.user.id if request.user.is_authenticated else None
+            if coupon.owner_id and coupon.owner_id != current_user_id:
                 messages.error(request, "Voucher này không thuộc ví của bạn.")
                 return redirect('shops:checkout')
 
@@ -1730,7 +2065,7 @@ def apply_coupon(request):
                     return redirect('shops:checkout')
 
             # ❌ user đã dùng chưa
-            if CouponUsage.objects.filter(coupon=coupon, user=request.user).exists():
+            if request.user.is_authenticated and CouponUsage.objects.filter(coupon=coupon, user=request.user).exists():
                 messages.error(request, "Mã giảm giá này bạn đã sử dụng rồi.")
                 return redirect('shops:checkout')
 
@@ -1815,6 +2150,67 @@ def shop_stats(request):
         .order_by("-total_qty")
         .first()
     )
+
+    product_sales = (
+        Product.objects
+        .select_related("category")
+        .annotate(
+            sold_qty=Coalesce(
+                Sum(
+                    "order_items__quantity",
+                    filter=~Q(order_items__order__status="Cancelled"),
+                ),
+                0,
+            ),
+            sales_revenue=Coalesce(
+                Sum(
+                    ExpressionWrapper(
+                        F("order_items__price") * F("order_items__quantity"),
+                        output_field=IntegerField(),
+                    ),
+                    filter=~Q(order_items__order__status="Cancelled"),
+                ),
+                0,
+            ),
+            available_stock_count=ExpressionWrapper(
+                F("stock") - F("reserved_stock"),
+                output_field=IntegerField(),
+            ),
+        )
+    )
+
+    best_selling_products = product_sales.order_by("-sold_qty", "-sales_revenue", "name")[:5]
+    least_selling_products = product_sales.order_by("sold_qty", "sales_revenue", "name")[:5]
+    inventory_products = product_sales.order_by("available_stock_count", "name")
+    low_stock_products = list(inventory_products.filter(available_stock_count__lt=10))
+
+    def _build_customer_purchase_stats(label, queryset):
+        order_count = queryset.count()
+        revenue = queryset.aggregate(total=Coalesce(Sum("total_price"), 0))["total"] or 0
+        total_items = (
+            OrderItem.objects
+            .filter(order__in=queryset)
+            .aggregate(total=Coalesce(Sum("quantity"), 0))["total"]
+            or 0
+        )
+        return {
+            "label": label,
+            "order_count": order_count,
+            "revenue": revenue,
+            "total_items": total_items,
+            "avg_order_value": int(revenue / order_count) if order_count else 0,
+        }
+
+    customer_purchase_stats = [
+        _build_customer_purchase_stats(
+            "Khách đã đăng nhập",
+            revenue_orders.filter(user__isnull=False),
+        ),
+        _build_customer_purchase_stats(
+            "Khách không đăng nhập",
+            revenue_orders.filter(user__isnull=True),
+        ),
+    ]
 
     # ===== PIE CHART (KỂ CẢ CANCELLED) =====
     status_map = dict(Order.STATUS_CHOICES)
@@ -1901,6 +2297,12 @@ def shop_stats(request):
         "weekly_revenue": weekly_revenue,
         "monthly_revenue": monthly_revenue,
         "top_product": top_product,
+        "best_selling_products": best_selling_products,
+        "least_selling_products": least_selling_products,
+        "inventory_products": inventory_products,
+        "low_stock_products": low_stock_products,
+        "low_stock_count": len(low_stock_products),
+        "customer_purchase_stats": customer_purchase_stats,
 
         "day_labels": day_labels,
         "day_data": day_data,
@@ -1999,7 +2401,6 @@ def update_user_rank(user):
         profile.save()
 
 
-@login_required
 def apply_best_coupon(request):
 
     cart = request.session.get("cart", {})
@@ -2007,6 +2408,10 @@ def apply_best_coupon(request):
         return redirect("shops:checkout")
 
     subtotal = sum(item["quantity"] * item["price"] for item in cart.values())
+
+    if not request.user.is_authenticated:
+        messages.warning(request, "Vui lòng đăng nhập để áp mã tốt nhất trong ví.")
+        return redirect("shops:checkout")
 
     rank_discount = calculate_rank_discount(request.user, subtotal)
     subtotal_after_rank = subtotal - rank_discount

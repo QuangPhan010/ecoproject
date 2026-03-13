@@ -1,0 +1,331 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+
+{% block title %}Chi tiết đơn hàng #{{ order.id }} | QShop{% endblock %}
+
+{% block content %}
+<style>
+.order-detail-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+}
+
+.summary-box{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:16px;
+  height:100%;
+  background:rgba(255,255,255,.65);
+}
+
+.badge-status{
+  font-size:.85rem;
+}
+</style>
+
+<div class="container mt-4 mb-5">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h4 class="mb-1"><i class="bi bi-receipt me-1"></i> Đơn hàng #{{ order.id }}</h4>
+      <div class="text-muted small">{{ order.created_at|date:"d/m/Y H:i" }}</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{% url 'shops:order_history' %}" class="btn btn-outline-secondary">
+        ← Quay lại lịch sử đơn
+      </a>
+      <a href="{% url 'shops:order_xml_export' order.id %}" class="btn btn-outline-dark">
+        Xuất XML
+      </a>
+      <a href="{{ qr_shipper_url }}" class="btn btn-outline-primary" target="_blank">
+        Mở QR chi tiết đơn
+      </a>
+      {% if is_admin %}
+      <a href="{% url 'shops:order_bill_pdf' order.qr_token %}" class="btn btn-primary" target="_blank">
+        Xuất hóa đơn
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card order-detail-card shadow-sm p-4">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+      <div>
+        <div class="fw-semibold mb-1">Trạng thái đơn hàng</div>
+        {% if order.status == "Pending" %}
+        <span class="badge text-bg-warning badge-status">Chờ xử lý</span>
+        {% elif order.status == "Processing" %}
+        <span class="badge text-bg-info badge-status">Đang xử lý</span>
+        {% elif order.status == "Shipped" %}
+        <span class="badge text-bg-primary badge-status">Đang giao</span>
+        {% elif order.status == "Delivered" %}
+        <span class="badge text-bg-success badge-status">Hoàn thành</span>
+        {% elif order.status == "Cancelled" %}
+        <span class="badge text-bg-secondary badge-status">Đã huỷ</span>
+        {% else %}
+        <span class="badge text-bg-dark badge-status">{{ order.get_status_display|default:order.status }}</span>
+        {% endif %}
+      </div>
+      <div class="text-end">
+        <div class="small text-muted">Tổng thanh toán</div>
+        <div class="fs-4 fw-bold text-danger">{{ order.total_price|intcomma }}₫</div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Người nhận</div>
+          <div>{{ order.customer_name }}</div>
+          <div class="text-muted small mt-1">{{ order.phone }}</div>
+          <div class="text-muted small mt-1">{{ order.address }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Thanh toán</div>
+          <div>{{ order.get_payment_method_display }}</div>
+          <div class="text-muted small mt-1">
+            {% if order.paid %}Đã thanh toán{% else %}Chưa thanh toán{% endif %}
+          </div>
+          {% if order.coupon %}
+          <div class="text-muted small mt-1">Voucher: {{ order.coupon.code }}</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Theo dõi đơn</div>
+          <div>Mã vận đơn: {{ order.tracking_code }}</div>
+          <div class="text-muted small mt-1">Cập nhật lần cuối: {{ order.updated_at|date:"d/m/Y H:i" }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Sản phẩm</th>
+            <th class="text-center">SL</th>
+            <th class="text-end">Giá</th>
+            <th class="text-end">Tạm tính</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in order.items.all %}
+          <tr>
+            <td>{{ item.product.name }}</td>
+            <td class="text-center">{{ item.quantity }}</td>
+            <td class="text-end">{{ item.price|intcomma }}₫</td>
+            <td class="text-end fw-semibold">{{ item.total_cost|intcomma }}₫</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="row g-3 mt-2">
+      <div class="col-lg-7">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Lịch sử trạng thái</div>
+          {% if status_logs %}
+          <div class="small">
+            {% for log in status_logs %}
+            <div class="mb-2">
+              <strong>{{ log.changed_at|date:"d/m/Y H:i:s" }}</strong>:
+              {{ log.from_status }} → {{ log.to_status }}
+              {% if log.changed_by %}
+              bởi {{ log.changed_by.username }}
+              {% else %}
+              bởi hệ thống
+              {% endif %}
+              ({{ log.source }})
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="text-muted small">Chưa có lịch sử trạng thái.</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Tóm tắt thanh toán</div>
+          <div class="d-flex justify-content-between small mb-2">
+            <span>Tạm tính</span>
+            <span>{{ order.items.all|length }} sản phẩm</span>
+          </div>
+          <div class="d-flex justify-content-between small mb-2">
+            <span>Giảm hạng</span>
+            <span>-{{ order.rank_discount|intcomma }}₫</span>
+          </div>
+          <div class="d-flex justify-content-between small mb-2">
+            <span>Giảm voucher</span>
+            <span>-{{ order.discount|intcomma }}₫</span>
+          </div>
+          <div class="d-flex justify-content-between small mb-3">
+            <span>Phí vận chuyển</span>
+            <span>{{ order.shipping_cost|intcomma }}₫</span>
+          </div>
+          <div class="d-flex justify-content-between fw-bold">
+            <span>Tổng cộng</span>
+            <span class="text-danger">{{ order.total_price|intcomma }}₫</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary-box mt-3">
+      <div class="fw-semibold mb-2">Thao tác</div>
+      <div class="d-flex gap-2 flex-wrap">
+        {% if order.status == "Pending" or order.status == "Processing" %}
+        <form method="post" action="{% url 'shops:cancel_order' order.id %}">
+          {% csrf_token %}
+          <div class="d-flex gap-2 flex-wrap align-items-start">
+            <textarea
+              name="cancel_reason"
+              class="form-control form-control-sm"
+              rows="2"
+              placeholder="Nhập lý do hủy đơn"
+              style="min-width: 260px;"
+              required
+            ></textarea>
+            <button class="btn btn-outline-danger">
+              Huỷ đơn hàng
+            </button>
+          </div>
+        </form>
+        {% else %}
+        <span class="badge bg-secondary">Không thể huỷ</span>
+        {% endif %}
+
+        {% if is_admin %}
+        <form method="post" action="{% url 'shops:admin_update_order_status' order.id %}" class="d-flex gap-2 flex-wrap">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{% url 'shops:order_detail' order.id %}">
+          <select name="status" class="form-select" style="min-width: 180px;">
+            {% for value, label in order.STATUS_CHOICES %}
+            <option value="{{ value }}" {% if order.status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-outline-success">Cập nhật trạng thái</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if order.cancel_reason %}
+    <div class="summary-box mt-3">
+      <div class="fw-semibold mb-2">Lý do huỷ đơn</div>
+      <div class="small">{{ order.cancel_reason }}</div>
+    </div>
+    {% endif %}
+
+    <div class="row g-3 mt-1">
+      <div class="col-lg-6">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Yêu cầu đổi/trả/hoàn tiền</div>
+          {% if can_create_after_sales_request and not is_admin %}
+          <form method="post" action="{% url 'shops:create_after_sales_request' order.id %}">
+            {% csrf_token %}
+            <div class="mb-2">
+              <label class="form-label small">Loại yêu cầu</label>
+              {{ after_sales_form.request_type }}
+            </div>
+            <div class="mb-2">
+              <label class="form-label small">Lý do</label>
+              {{ after_sales_form.reason }}
+            </div>
+            <div class="mb-2">
+              <label class="form-label small">Tên liên hệ</label>
+              {{ after_sales_form.contact_name }}
+            </div>
+            <div class="mb-2">
+              <label class="form-label small">Email liên hệ</label>
+              {{ after_sales_form.contact_email }}
+            </div>
+            <div class="mb-3">
+              <label class="form-label small">SĐT liên hệ</label>
+              {{ after_sales_form.contact_phone }}
+            </div>
+            <button class="btn btn-outline-primary">Gửi yêu cầu</button>
+          </form>
+          {% elif not can_create_after_sales_request %}
+          <div class="text-muted small">Chỉ có thể tạo yêu cầu sau khi đơn hàng ở trạng thái hoàn thành.</div>
+          {% else %}
+          <div class="text-muted small">Admin có thể xử lý yêu cầu ở danh sách bên phải.</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="summary-box">
+          <div class="fw-semibold mb-2">Danh sách yêu cầu hậu mãi</div>
+          {% if after_sales_requests %}
+          <div class="d-grid gap-2">
+            {% for req in after_sales_requests %}
+            <div class="border rounded p-3">
+              <div class="d-flex justify-content-between gap-2 flex-wrap">
+                <div>
+                  <div class="fw-semibold">{{ req.get_request_type_display }}</div>
+                  <div class="small text-muted">{{ req.created_at|date:"d/m/Y H:i" }}</div>
+                </div>
+                <span class="badge text-bg-secondary">{{ req.get_status_display }}</span>
+              </div>
+              <div class="small mt-2">{{ req.reason }}</div>
+              <div class="small text-muted mt-1">
+                Liên hệ: {{ req.contact_name }} | {{ req.contact_phone }}{% if req.contact_email %} | {{ req.contact_email }}{% endif %}
+              </div>
+              {% if req.resolution_note %}
+              <div class="small mt-2"><strong>Ghi chú xử lý:</strong> {{ req.resolution_note }}</div>
+              {% endif %}
+              {% if req.refund_amount > 0 %}
+              <div class="small mt-1"><strong>Số tiền hoàn:</strong> {{ req.refund_amount|intcomma }}₫</div>
+              {% endif %}
+              {% if is_admin %}
+              <form method="post" action="{% url 'shops:update_after_sales_request' req.id %}" class="mt-3">
+                {% csrf_token %}
+                <div class="row g-2">
+                  <div class="col-md-4">
+                    <select name="status" class="form-select form-select-sm">
+                      {% for value, label in req.STATUS_CHOICES %}
+                      <option value="{{ value }}" {% if req.status == value %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-4">
+                    <input
+                      type="number"
+                      name="refund_amount"
+                      class="form-control form-control-sm"
+                      min="0"
+                      value="{{ req.refund_amount }}"
+                      placeholder="Số tiền hoàn"
+                    >
+                  </div>
+                  <div class="col-12">
+                    <textarea
+                      name="resolution_note"
+                      class="form-control form-control-sm"
+                      rows="2"
+                      placeholder="Ghi chú xử lý"
+                    >{{ req.resolution_note }}</textarea>
+                  </div>
+                  <div class="col-12">
+                    <button class="btn btn-outline-success btn-sm">Cập nhật yêu cầu</button>
+                  </div>
+                </div>
+              </form>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="text-muted small">Chưa có yêu cầu hậu mãi nào.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

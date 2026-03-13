@@ -10,7 +10,7 @@
       <h2 style="margin: 0 0 8px;">QSHOP - Xác nhận đơn hàng</h2>
       <p style="margin: 0 0 12px;">Đơn hàng <strong>#{{ order.id }}</strong> đã được tạo thành công.</p>
 
-      <p style="margin: 0 0 6px;"><strong>Người nhận:</strong> {{ order.user.get_full_name|default:order.user.username }}</p>
+      <p style="margin: 0 0 6px;"><strong>Người nhận:</strong> {{ order.customer_name }}</p>
       <p style="margin: 0 0 6px;"><strong>SĐT:</strong> {{ order.phone }}</p>
       <p style="margin: 0 0 12px;"><strong>Địa chỉ:</strong> {{ order.address }}</p>
 
@@ -51,7 +51,7 @@
       </div>
 
       <p style="margin-top: 16px;">
-        Bạn có thể xem đơn hàng trong lịch sử mua hàng:
+        Bạn có thể theo dõi đơn hàng tại:
         <a href="{{ order_history_url }}">{{ order_history_url }}</a>
       </p>
     </div>

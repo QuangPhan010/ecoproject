@@ -46,11 +46,8 @@ khoản | QShop{% endblock %} {% block content %}
           thống xác nhận nhanh hơn.
         </div>
 
-        <a
-          href="{% url 'shops:order_history' %}"
-          class="btn btn-outline-secondary mt-2"
-        >
-          Xem đơn hàng của tôi
+        <a href="{{ order_tracking_url }}" class="btn btn-outline-secondary mt-2">
+          Theo dõi đơn hàng
         </a>
       </div>
     </div>

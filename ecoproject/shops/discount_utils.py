@@ -1,4 +1,6 @@
 def calculate_rank_discount(user, subtotal):
+    if not getattr(user, "is_authenticated", False):
+        return 0
 
     profile = user.profile
 

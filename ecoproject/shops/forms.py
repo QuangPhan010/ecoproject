@@ -1,5 +1,5 @@
 from django import forms
-from .models import Product, Category, Review, Coupon
+from .models import Product, Category, Review, Coupon, AfterSalesRequest
 
 class ProductForm(forms.ModelForm):
     class Meta:
@@ -9,7 +9,7 @@ class ProductForm(forms.ModelForm):
 class CategoryForm(forms.ModelForm):
     class Meta:
         model = Category
-        fields = ['name', 'slug']
+        fields = ['name', 'slug', 'is_active']
 
 class ReviewForm(forms.ModelForm):
     class Meta:
@@ -37,6 +37,71 @@ class CouponForm(forms.Form):
                 'placeholder': 'Nhập mã giảm giá (nếu có)'
             })
         )
+
+
+class CheckoutForm(forms.Form):
+    full_name = forms.CharField(
+        max_length=150,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+        label="Họ và tên",
+    )
+    email = forms.EmailField(
+        widget=forms.EmailInput(attrs={"class": "form-control"}),
+        label="Email",
+    )
+    phone = forms.CharField(
+        max_length=20,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+        label="Số điện thoại",
+    )
+    address = forms.CharField(
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+        label="Địa chỉ giao hàng",
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not user or not getattr(user, "is_authenticated", False):
+            return
+
+        profile = getattr(user, "profile", None)
+        self.fields["full_name"].initial = user.get_full_name() or user.username
+        self.fields["email"].initial = user.email
+        if profile:
+            self.fields["phone"].initial = profile.phone
+            self.fields["address"].initial = profile.address
+
+
+class AfterSalesRequestForm(forms.ModelForm):
+    class Meta:
+        model = AfterSalesRequest
+        fields = ["request_type", "reason", "contact_name", "contact_email", "contact_phone"]
+        widgets = {
+            "request_type": forms.Select(attrs={"class": "form-select"}),
+            "reason": forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+            "contact_name": forms.TextInput(attrs={"class": "form-control"}),
+            "contact_email": forms.EmailInput(attrs={"class": "form-control"}),
+            "contact_phone": forms.TextInput(attrs={"class": "form-control"}),
+        }
+
+    def __init__(self, *args, order=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not order:
+            return
+        self.fields["contact_name"].initial = order.customer_name
+        self.fields["contact_email"].initial = order.customer_email
+        self.fields["contact_phone"].initial = order.phone
+
+
+class AfterSalesRequestUpdateForm(forms.ModelForm):
+    class Meta:
+        model = AfterSalesRequest
+        fields = ["status", "refund_amount", "resolution_note"]
+        widgets = {
+            "status": forms.Select(attrs={"class": "form-select form-select-sm"}),
+            "refund_amount": forms.NumberInput(attrs={"class": "form-control form-control-sm", "min": 0}),
+            "resolution_note": forms.Textarea(attrs={"class": "form-control form-control-sm", "rows": 2}),
+        }
     
 class CouponCreateForm(forms.ModelForm):
 
@@ -74,3 +139,4 @@ class CouponCreateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['valid_from'].input_formats = ['%Y-%m-%dT%H:%M']
         self.fields['valid_to'].input_formats = ['%Y-%m-%dT%H:%M']
+        self.fields['categories'].queryset = Category.objects.filter(is_active=True).order_by('name')

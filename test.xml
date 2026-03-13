@@ -1,0 +1,20 @@
+<Invoice>
+    <Seller>
+        <Name>Công ty ABC</Name>
+        <TaxCode>0123456789</TaxCode>
+    </Seller>
+
+    <Buyer>
+        <Name>Nguyễn Văn A</Name>
+    </Buyer>
+
+    <Items>
+        <Item>
+            <Product>Laptop</Product>
+            <Quantity>1</Quantity>
+            <Price>15000000</Price>
+        </Item>
+    </Items>
+
+    <Total>15000000</Total>
+</Invoice>

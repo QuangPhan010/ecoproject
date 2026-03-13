@@ -85,6 +85,36 @@
   .reward-log {
     min-height: 56px;
   }
+
+  .odds-card,
+  .pity-card {
+    border: 1px solid #dbeafe;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.9);
+  }
+
+  .odds-pill {
+    display: inline-flex;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 700;
+    font-size: 0.9rem;
+  }
+
+  .pity-progress {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+  }
+
+  .pity-progress > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #f59e0b, #ef4444);
+  }
 </style>
 
 <div class="container mt-4 mb-5">
@@ -128,6 +158,48 @@
         Mở {{ n }} hộp
       </button>
       {% endfor %}
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-lg-7">
+        <div class="odds-card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h6 class="mb-0">Tỷ lệ theo cấu hình hiện tại</h6>
+            <span class="text-muted small">{{ pity_status.box_label }}</span>
+          </div>
+          <div class="row g-2">
+            {% for item in reward_odds %}
+            <div class="col-sm-6 col-xl-3">
+              <div class="border rounded-3 p-2 h-100 bg-white">
+                <div class="small text-muted mb-1">{{ item.type }}</div>
+                <div class="odds-pill">{{ item.percent|floatformat:1 }}%</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="pity-card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Voucher Pity System</h6>
+            <span class="badge text-bg-warning text-dark">{{ pity_status.misses }}/{{ pity_status.threshold }}</span>
+          </div>
+          <div class="small text-muted mb-2">
+            Mỗi lượt không ra voucher sẽ tăng nhẹ tỉ lệ voucher. Tới ngưỡng sẽ đảm bảo có ít nhất 1 voucher nếu pool hiện có voucher.
+          </div>
+          <div class="pity-progress mb-2">
+            <span style="width: {{ pity_status.progress_percent }}%;"></span>
+          </div>
+          <div class="small text-muted">
+            {% if pity_status.guaranteed_in == 0 %}
+            Lượt này đã tới ngưỡng đảm bảo voucher.
+            {% else %}
+            Còn {{ pity_status.guaranteed_in }} lượt miss nữa để kích hoạt đảm bảo voucher.
+            {% endif %}
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="reward-log alert alert-info mb-4" id="reward-log">
@@ -175,104 +247,6 @@
     </div>
     {% else %}
     <div class="text-muted">Bạn chưa có lịch sử mở hộp.</div>
-    {% endif %}
-
-    {% if request.user.is_staff or request.user.is_superuser %}
-    <hr class="my-4" />
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <h6 class="mb-0">Quản lý quà Mystery Box (Admin)</h6>
-      <span class="text-muted small">Chỉnh trực tiếp tại trang này</span>
-    </div>
-
-    <div class="card p-3 mb-3">
-      <div class="fw-semibold mb-2">Thêm quà mới</div>
-      <form method="post" action="{% url 'users:manage_mystery_rewards' %}" class="row g-2">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="create">
-        <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
-        <div class="col-lg-3">
-          <input class="form-control" name="name" placeholder="Tên quà" required>
-        </div>
-        <div class="col-lg-2">
-          <select class="form-select" name="box_tier">
-            <option value="STANDARD">STANDARD</option>
-            <option value="PREMIUM">PREMIUM</option>
-          </select>
-        </div>
-        <div class="col-lg-2">
-          <select class="form-select" name="reward_type">
-            <option value="POINTS">POINTS</option>
-            <option value="PLAYS">PLAYS</option>
-            <option value="VOUCHER">VOUCHER</option>
-            <option value="EMPTY">EMPTY</option>
-          </select>
-        </div>
-        <div class="col-lg-1"><input class="form-control" name="points_value" type="number" min="0" placeholder="P"></div>
-        <div class="col-lg-1"><input class="form-control" name="plays_value" type="number" min="0" placeholder="L"></div>
-        <div class="col-lg-1"><input class="form-control" name="voucher_discount" type="number" min="0" placeholder="%"></div>
-        <div class="col-lg-1"><input class="form-control" name="weight" type="number" min="1" value="1"></div>
-        <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
-      </form>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-sm align-middle">
-        <thead>
-          <tr>
-            <th>Tên</th>
-            <th>Box</th>
-            <th>Type</th>
-            <th>P</th>
-            <th>L</th>
-            <th>%</th>
-            <th>Max</th>
-            <th>Ngày</th>
-            <th>W</th>
-            <th>Sort</th>
-            <th>On</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in manage_rewards %}
-          <tr>
-            <form method="post" action="{% url 'users:manage_mystery_rewards' %}">
-              {% csrf_token %}
-              <input type="hidden" name="reward_id" value="{{ r.id }}">
-              <input type="hidden" name="selected_box_type" value="{{ selected_box_type }}">
-              <td><input class="form-control form-control-sm" name="name" value="{{ r.name }}"></td>
-              <td>
-                <select class="form-select form-select-sm" name="box_tier">
-                  <option value="STANDARD" {% if r.box_tier == "STANDARD" %}selected{% endif %}>STANDARD</option>
-                  <option value="PREMIUM" {% if r.box_tier == "PREMIUM" %}selected{% endif %}>PREMIUM</option>
-                </select>
-              </td>
-              <td>
-                <select class="form-select form-select-sm" name="reward_type">
-                  <option value="POINTS" {% if r.reward_type == "POINTS" %}selected{% endif %}>POINTS</option>
-                  <option value="PLAYS" {% if r.reward_type == "PLAYS" %}selected{% endif %}>PLAYS</option>
-                  <option value="VOUCHER" {% if r.reward_type == "VOUCHER" %}selected{% endif %}>VOUCHER</option>
-                  <option value="EMPTY" {% if r.reward_type == "EMPTY" %}selected{% endif %}>EMPTY</option>
-                </select>
-              </td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="points_value" value="{{ r.points_value }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="plays_value" value="{{ r.plays_value }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_discount" value="{{ r.voucher_discount }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_max_discount" value="{{ r.voucher_max_discount }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="voucher_valid_days" value="{{ r.voucher_valid_days }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="1" name="weight" value="{{ r.weight }}"></td>
-              <td><input class="form-control form-control-sm" type="number" min="0" name="sort_order" value="{{ r.sort_order }}"></td>
-              <td><input class="form-check-input" type="checkbox" name="active" {% if r.active %}checked{% endif %}></td>
-              <td class="d-flex gap-1">
-                <button class="btn btn-sm btn-success" name="action" value="update">Lưu</button>
-                <button class="btn btn-sm btn-outline-secondary" name="action" value="toggle">Bật/Tắt</button>
-              </td>
-            </form>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
     {% endif %}
   </div>
 </div>
@@ -364,6 +338,9 @@
         playCountEl.textContent = data.remaining_plays.toLocaleString("vi-VN");
         rewardLog.className = "reward-log alert alert-success mb-4";
         rewardLog.textContent = "Kết quả: " + formatRewards(data.rewards);
+        if (data.pity_triggered) {
+          rewardLog.textContent += " | Pity voucher đã kích hoạt.";
+        }
 
         setTimeout(() => {
           resetBoard();

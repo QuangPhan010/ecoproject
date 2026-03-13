@@ -13,6 +13,7 @@ import uuid
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(unique=True)
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
@@ -137,7 +138,9 @@ class Order(models.Model):
         ('Cancelled', 'Cancelled'),
     )
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='orders')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='orders', null=True, blank=True)
+    guest_name = models.CharField(max_length=150, blank=True)
+    guest_email = models.EmailField(blank=True)
     address = models.CharField(max_length=255)
     phone = models.CharField(max_length=20)
     total_price = models.IntegerField()
@@ -159,6 +162,7 @@ class Order(models.Model):
         default='',
         blank=True
     )
+    cancel_reason = models.TextField(blank=True)
 
     PAYMENT_CHOICES = (
         ('COD', 'Thanh toán khi nhận hàng'),
@@ -179,6 +183,18 @@ class Order(models.Model):
         if not self.tracking_code:
             self.tracking_code = f"QSHOP{random.randint(1000, 9999)}"
         super().save(*args, **kwargs)
+
+    @property
+    def customer_name(self):
+        if self.user_id:
+            return self.user.get_full_name() or self.user.username
+        return self.guest_name or "Khach hang"
+
+    @property
+    def customer_email(self):
+        if self.user_id:
+            return self.user.email
+        return self.guest_email
 
     class Meta:
         ordering = ('-created_at',)
@@ -235,6 +251,66 @@ class OrderItem(models.Model):
     @property
     def total_cost(self):
         return self.price * self.quantity
+
+
+class AfterSalesRequest(models.Model):
+    TYPE_EXCHANGE = "EXCHANGE"
+    TYPE_RETURN = "RETURN"
+    TYPE_REFUND = "REFUND"
+    TYPE_CHOICES = (
+        (TYPE_EXCHANGE, "Đổi hàng"),
+        (TYPE_RETURN, "Hoàn trả hàng"),
+        (TYPE_REFUND, "Hoàn tiền"),
+    )
+
+    STATUS_PENDING = "PENDING"
+    STATUS_APPROVED = "APPROVED"
+    STATUS_REJECTED = "REJECTED"
+    STATUS_COMPLETED = "COMPLETED"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Chờ xử lý"),
+        (STATUS_APPROVED, "Đã duyệt"),
+        (STATUS_REJECTED, "Từ chối"),
+        (STATUS_COMPLETED, "Hoàn tất"),
+    )
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="after_sales_requests")
+    request_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    reason = models.TextField()
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="after_sales_requests",
+    )
+    contact_name = models.CharField(max_length=150, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
+    resolution_note = models.TextField(blank=True)
+    refund_amount = models.IntegerField(default=0)
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="processed_after_sales_requests",
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["request_type", "-created_at"]),
+            models.Index(fields=["order", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"After-sales #{self.id} - Order #{self.order_id}"
 
 
 from django.core.validators import MinValueValidator, MaxValueValidator

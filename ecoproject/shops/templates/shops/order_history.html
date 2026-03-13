@@ -1,5 +1,10 @@
-{% extends "shops/base.html" %} {% load humanize %} {% load static%} 
-{% block title %}Lịch sử đơn hàng | QShop{% endblock %} {% block content %}
+{% extends "shops/base.html" %}
+{% load humanize %}
+{% load static %}
+
+{% block title %}Lịch sử đơn hàng | QShop{% endblock %}
+
+{% block content %}
 <link rel="stylesheet" href="{% static 'css/order_history.css' %}" />
 
 <div class="container mt-4 mb-5">
@@ -76,41 +81,46 @@
   </form>
   {% endif %}
 
-  <div class="accordion" id="ordersAccordion">
+  <div class="d-grid gap-3">
     {% for order in orders %}
-    <div class="accordion-item order-card mb-3">
-      <!-- HEADER -->
-      <h2 class="accordion-header">
-        <button
-          class="accordion-button collapsed order-header"
-          data-bs-toggle="collapse"
-          data-bs-target="#collapse{{ order.id }}"
-        >
-          <div class="w-100 d-flex justify-content-between align-items-center">
+    <div class="card order-card shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+          <div class="d-flex align-items-start gap-3">
+            {% if is_admin %}
+            <div class="form-check mt-1">
+              <input class="form-check-input js-bulk-order"
+                     type="checkbox"
+                     name="order_ids"
+                     value="{{ order.id }}"
+                     form="bulk-status-form"
+                     id="bulk-order-{{ order.id }}">
+            </div>
+            {% endif %}
             <div>
-              <strong>Đơn hàng #{{ order.id }}</strong>
-              <div class="small text-muted">
-                {{ order.created_at|date:"d/m/Y H:i" }}
-              </div>
+              <a href="{% url 'shops:order_detail' order.id %}" class="text-decoration-none">
+                <h5 class="mb-1">Đơn hàng #{{ order.id }}</h5>
+              </a>
+              <div class="small text-muted">{{ order.created_at|date:"d/m/Y H:i" }}</div>
               {% if is_admin %}
-              <div class="small text-muted">
-                Khách: {{ order.user.get_full_name|default:order.user.username }}
-                {% if order.user.email %}({{ order.user.email }}){% endif %}
+              <div class="small text-muted mt-1">
+                Khách: {{ order.customer_name }}
+                {% if order.customer_email %}({{ order.customer_email }}){% endif %}
               </div>
               {% endif %}
-            </div>
-
-            <div class="text-end">
-              <div class="fw-semibold text-danger">
-                {{ order.total_price|intcomma }}₫
+              <div class="small text-muted mt-1">
+                Thanh toán: {{ order.get_payment_method_display }}
               </div>
+            </div>
+          </div>
 
+          <div class="text-end">
+            <div class="fw-semibold text-danger fs-5">{{ order.total_price|intcomma }}₫</div>
+            <div class="mt-1">
               {% if order.status == "Pending" %}
               <span class="badge badge-status badge-pending">Chờ xử lý</span>
               {% elif order.status == "Processing" %}
-              <span class="badge badge-status badge-processing"
-                >Đang xử lý</span
-              >
+              <span class="badge badge-status badge-processing">Đang xử lý</span>
               {% elif order.status == "Shipped" %}
               <span class="badge badge-status badge-shipped">Đang giao</span>
               {% elif order.status == "Delivered" %}
@@ -120,173 +130,24 @@
               {% endif %}
             </div>
           </div>
-        </button>
-      </h2>
+        </div>
 
-      <!-- BODY -->
-      <div
-        id="collapse{{ order.id }}"
-        class="accordion-collapse collapse"
-        data-bs-parent="#ordersAccordion"
-      >
-        <div class="accordion-body">
-          <!-- TIMELINE -->
-          <div class="order-timeline">
-            <div
-              class="timeline-step {% if order.status != 'Pending' %}timeline-active{% endif %}"
-            >
-              <div class="timeline-dot"></div>
-              <div class="timeline-label">Chờ xử lý</div>
+        <div class="row g-3 mt-2">
+          <div class="col-lg-8">
+            <div class="small text-muted">
+              Người nhận: {{ order.customer_name }} | {{ order.phone }}
             </div>
-
-            <div
-              class="timeline-step {% if order.status == 'Processing' or order.status == 'Shipped' or order.status == 'Delivered' %}timeline-active{% endif %}"
-            >
-              <div class="timeline-dot"></div>
-              <div class="timeline-label">Đang xử lý</div>
+            <div class="small text-muted mt-1">
+              {{ order.address }}
             </div>
-
-            <div
-              class="timeline-step {% if order.status == 'Shipped' or order.status == 'Delivered' %}timeline-active{% endif %}"
-            >
-              <div class="timeline-dot"></div>
-              <div class="timeline-label">Đang giao</div>
-            </div>
-
-            <div
-              class="timeline-step {% if order.status == 'Delivered' %}timeline-active{% endif %}"
-            >
-              <div class="timeline-dot"></div>
-              <div class="timeline-label">Hoàn thành</div>
+            <div class="small text-muted mt-1">
+              {{ order.items.count }} sản phẩm
             </div>
           </div>
-
-          <!-- CUSTOMER INFO -->
-          <div class="row mb-3">
-            <div class="col-md-6">
-              <div class="fw-semibold mb-1">👤 Người nhận</div>
-              <div class="order-meta">
-                <span
-                  ><strong>Tên:</strong>
-                  {{ order.user.get_full_name|default:order.user.username }}
-                </span>
-                <span><strong>SĐT:</strong> {{ order.phone }}</span>
-                <span><strong>Địa chỉ:</strong> {{ order.address }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-6 text-md-end mt-3 mt-md-0">
-              <div class="fw-semibold mb-1">💳 Thanh toán</div>
-              <span class="text-muted">
-                {{ order.get_payment_method_display }}
-              </span>
-              <div class="mt-2 text-end">
-                <a href="{{ order.qr_shipper_url }}"
-                   class="btn btn-sm btn-outline-secondary"
-                   target="_blank">
-                  Mở QR chi tiết đơn
-                </a>
-
-                <div class="small text-muted mt-1">
-                  Quét QR xem chi tiết đơn
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ACTION -->
-          <div class="d-flex gap-2 flex-wrap">
-            {% if is_admin %}
-            <div class="form-check me-2">
-              <input class="form-check-input js-bulk-order"
-                     type="checkbox"
-                     name="order_ids"
-                     value="{{ order.id }}"
-                     form="bulk-status-form"
-                     id="bulk-order-{{ order.id }}">
-              <label class="form-check-label" for="bulk-order-{{ order.id }}">
-                Chọn đơn #{{ order.id }}
-              </label>
-            </div>
-            {% endif %}
-            {% if order.status == "Pending" or order.status == "Processing" %}
-            <form method="post" action="{% url 'shops:cancel_order' order.id %}">
-              {% csrf_token %}
-              <button class="btn btn-sm btn-outline-danger">
-                ❌ Huỷ đơn hàng
-              </button>
-            </form>
-            {% else %}
-            <span class="badge bg-secondary">Không thể huỷ</span>
-            {% endif %}
-            {% if is_admin %}
-            <form method="post" action="{% url 'shops:admin_update_order_status' order.id %}" class="d-flex gap-2">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <select name="status" class="form-select form-select-sm" style="min-width: 160px;">
-                {% for value, label in status_choices %}
-                <option value="{{ value }}" {% if order.status == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <button class="btn btn-sm btn-outline-success">Cập nhật</button>
-            </form>
-            {% endif %}
-            {% if user.is_staff or user.is_superuser %}
-            <a class="btn btn-sm btn-outline-primary" target="_blank"
-              href="{% url 'shops:order_bill_pdf' order.qr_token %}">
-              Xuất hóa đơn
+          <div class="col-lg-4 d-flex justify-content-lg-end align-items-start">
+            <a href="{% url 'shops:order_detail' order.id %}" class="btn btn-primary">
+              Xem chi tiết
             </a>
-            {% endif %}
-          </div>
-
-          {% if is_admin %}
-          <div class="mt-3">
-            <div class="fw-semibold mb-1">Lịch sử trạng thái</div>
-            {% if order.status_logs.all %}
-            <div class="small border rounded p-2 bg-light">
-              {% for log in order.status_logs.all|slice:":8" %}
-              <div class="mb-1">
-                <strong>{{ log.changed_at|date:"d/m/Y H:i:s" }}</strong>:
-                {{ log.from_status }} → {{ log.to_status }}
-                {% if log.changed_by %}
-                bởi {{ log.changed_by.username }}
-                {% else %}
-                bởi hệ thống
-                {% endif %}
-                ({{ log.source }})
-              </div>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="small text-muted">Chưa có log trạng thái.</div>
-            {% endif %}
-          </div>
-          {% endif %}
-
-          <!-- ITEMS -->
-          <div class="table-responsive mt-3">
-            <table class="table align-middle">
-              <thead>
-                <tr>
-                  <th>Sản phẩm</th>
-                  <th class="text-center">SL</th>
-                  <th class="text-end">Giá</th>
-                  <th class="text-end">Tạm tính</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in order.items.all %}
-                <tr>
-                  <td>{{ item.product.name }}</td>
-                  <td class="text-center">{{ item.quantity }}</td>
-                  <td class="text-end">{{ item.price|intcomma }}₫</td>
-                  <td class="text-end fw-semibold">
-                    {{ item.total_cost|intcomma }}₫
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
           </div>
         </div>
       </div>

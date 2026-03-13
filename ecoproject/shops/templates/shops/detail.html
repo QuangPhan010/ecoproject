@@ -188,8 +188,7 @@
         {% endif %}
 
         <span class="star">
-          {% for i in "12345" %} {% if forloop.counter <= review.rating %} ★ {%
-          else %} ☆ {% endif %} {% endfor %}
+          {% for i in "12345" %} {% if forloop.counter <= review.rating %} ★ {% else %} ☆ {% endif %} {% endfor %}
         </span>
 
         <p class="mb-1 review-content">{{ review.content }}</p>

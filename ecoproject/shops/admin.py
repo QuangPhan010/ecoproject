@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from .models import (
-    Product, FlashSale, ProductOption, ProductColor,
-    Order, OrderItem, Coupon, WishlistItem, OrderStatusLog
+    Product, FlashSale, ProductOption, ProductColor, Category,
+    Order, OrderItem, Coupon, WishlistItem, OrderStatusLog, AfterSalesRequest
 )
 from .views import _apply_status_change
 
@@ -15,6 +15,14 @@ class ProductOptionInline(admin.TabularInline):
 class ProductColorInline(admin.TabularInline):
     model = ProductColor
     extra = 1
+
+
+@admin.register(Category)
+class CategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "slug")
+    prepopulated_fields = {"slug": ("name",)}
 
 
 @admin.register(Product)
@@ -133,3 +141,19 @@ class OrderStatusLogAdmin(admin.ModelAdmin):
     list_display = ("id", "order", "from_status", "to_status", "source", "changed_by", "changed_at")
     list_filter = ("source", "from_status", "to_status", "changed_at")
     search_fields = ("order__id", "changed_by__username", "changed_by__email")
+
+
+@admin.register(AfterSalesRequest)
+class AfterSalesRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "order",
+        "request_type",
+        "status",
+        "refund_amount",
+        "contact_name",
+        "processed_by",
+        "created_at",
+    )
+    list_filter = ("request_type", "status", "created_at")
+    search_fields = ("order__id", "contact_name", "contact_email", "contact_phone")
