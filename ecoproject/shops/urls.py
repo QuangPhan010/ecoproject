@@ -42,6 +42,7 @@ urlpatterns = [
     path('orders/<int:order_id>/cancel/', views.cancel_order, name='cancel_order'),
     path('orders/<int:order_id>/status/', views.admin_update_order_status, name='admin_update_order_status'),
     path('orders/bulk-status/', views.admin_bulk_update_order_status, name='admin_bulk_update_order_status'),
+    path('notifications/read/', views.mark_notifications_read, name='mark_notifications_read'),
     path('orders/<int:order_id>/qr/', views.order_qr_detail, name='order_qr_detail'),
     path('q/<uuid:token>/', views.order_qr_public, name='order_qr_public'),
     path('q/<uuid:token>/bill.pdf', views.order_bill_pdf, name='order_bill_pdf'),
@@ -56,6 +57,7 @@ urlpatterns = [
     path("api/checkout-preview/",views.checkout_preview_api,name="checkout_preview_api"),
     path("api/checkout-summary/", views.checkout_summary_api, name="checkout_summary_api"),
     path("apply-best-coupon/",views.apply_best_coupon,name="apply_best_coupon"),
+    path("ai-chat/", views.ai_chatbot, name="ai_chat"),
     
     path('<slug:slug>/', views.detail, name='detail'),
 

@@ -1,5 +1,5 @@
 from django.utils import timezone
-from .models import Coupon, WishlistItem
+from .models import Coupon, WishlistItem, UserNotification
 from django.core.cache import cache
 
 
@@ -9,6 +9,8 @@ def cart_context(request):
     compare_items_count = len(request.session.get("compare_products", []))
     wishlist_items_count = 0
     navbar_owned_vouchers = []
+    navbar_notifications = []
+    navbar_unread_notifications_count = 0
 
     if request.user.is_authenticated:
         cache_key = f"wishlist_items_count:{request.user.id}"
@@ -30,6 +32,15 @@ def cart_context(request):
             .exclude(couponusage__user=request.user)
             .order_by("valid_to", "id")[:8]
         )
+        navbar_notifications = list(
+            UserNotification.objects
+            .filter(user=request.user)
+            .order_by("-created_at")[:8]
+        )
+        navbar_unread_notifications_count = UserNotification.objects.filter(
+            user=request.user,
+            is_read=False,
+        ).count()
 
     return {
         'cart_items_count': cart_items_count,
@@ -38,4 +49,6 @@ def cart_context(request):
         'cart': cart,
         'navbar_owned_vouchers': navbar_owned_vouchers,
         'navbar_owned_vouchers_count': len(navbar_owned_vouchers),
+        'navbar_notifications': navbar_notifications,
+        'navbar_unread_notifications_count': navbar_unread_notifications_count,
     }

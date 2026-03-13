@@ -12,7 +12,8 @@ from django.contrib.auth.hashers import check_password, make_password
 from .models import MysteryBoxRewardOption, Profile, RewardVoucherOption
 from .views import MYSTERY_BOX_PITY_RULES, PASSWORD_RESET_OTP_RESEND_SECONDS
 from .models import PasswordResetOTP
-from shops.models import Coupon, CouponUsage
+from shops.models import Coupon, CouponUsage, UserNotification, Order, Product
+from users.models import RefundWalletTransaction
 
 
 class RewardAdminConsoleTests(TestCase):
@@ -172,6 +173,136 @@ class RewardAdminConsoleTests(TestCase):
         self.assertNotContains(response, expired_coupon.code)
         self.assertNotContains(response, used_coupon.code)
         self.assertNotContains(response, "STAFF10")
+
+    def test_navbar_notifications_render_latest_notifications(self):
+        self.client.login(username="member", password="pass123")
+        UserNotification.objects.create(
+            user=self.user,
+            notification_type=UserNotification.TYPE_VOUCHER,
+            title="Bạn vừa nhận voucher mới",
+            message="Voucher TEST10 đã được thêm vào ví của bạn.",
+            target_url=reverse("users:rewards"),
+        )
+
+        response = self.client.get(reverse("users:profile"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bạn vừa nhận voucher mới")
+        self.assertContains(response, "Voucher TEST10 đã được thêm vào ví của bạn.")
+
+    def test_redeem_points_voucher_creates_notification(self):
+        self.user.profile.points = 200
+        self.user.profile.save(update_fields=["points"])
+        self.client.login(username="member", password="pass123")
+
+        response = self.client.post(
+            reverse("users:redeem_points_voucher"),
+            {"voucher_option": self.voucher.id},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        notification = UserNotification.objects.get(
+            user=self.user,
+            notification_type=UserNotification.TYPE_VOUCHER,
+        )
+        self.assertIn("Đổi điểm thành công", notification.title)
+
+    @patch("shops.views.calculate_shipping_cost", return_value=(0, None))
+    @patch("shops.views._send_order_email", return_value=None)
+    def test_checkout_with_refund_wallet_deducts_balance(self, _mock_email, _mock_shipping):
+        self.user.profile.refund_wallet_balance = 200000
+        self.user.profile.save(update_fields=["refund_wallet_balance"])
+        self.client.login(username="member", password="pass123")
+        product = Product.objects.create(
+            name="Wallet Phone",
+            slug="wallet-phone",
+            price=100000,
+            image="https://example.com/wallet.jpg",
+            stock=5,
+            reserved_stock=0,
+            available=True,
+        )
+
+        session = self.client.session
+        session["cart"] = {
+            str(product.id): {
+                "quantity": 1,
+                "price": product.price,
+                "name": product.name,
+                "image": product.image,
+            }
+        }
+        session.save()
+
+        response = self.client.post(
+            reverse("shops:checkout"),
+            data={
+                "action": "place_order",
+                "full_name": "Member Test",
+                "email": "member@example.com",
+                "phone": "0900000000",
+                "address": "HCM",
+                "payment_method": "WALLET",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(user=self.user)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(order.payment_method, "WALLET")
+        self.assertTrue(order.paid)
+        self.assertEqual(self.user.profile.refund_wallet_balance, 100000)
+        self.assertTrue(
+            RefundWalletTransaction.objects.filter(
+                user=self.user,
+                order=order,
+                transaction_type=RefundWalletTransaction.TYPE_PAYMENT,
+            ).exists()
+        )
+
+    @patch("shops.views.calculate_shipping_cost", return_value=(0, None))
+    @patch("shops.views._send_order_email", return_value=None)
+    def test_checkout_with_refund_wallet_requires_full_balance(self, _mock_email, _mock_shipping):
+        self.user.profile.refund_wallet_balance = 50000
+        self.user.profile.save(update_fields=["refund_wallet_balance"])
+        self.client.login(username="member", password="pass123")
+        product = Product.objects.create(
+            name="Wallet Limit",
+            slug="wallet-limit",
+            price=100000,
+            image="https://example.com/wallet-limit.jpg",
+            stock=5,
+            reserved_stock=0,
+            available=True,
+        )
+
+        session = self.client.session
+        session["cart"] = {
+            str(product.id): {
+                "quantity": 1,
+                "price": product.price,
+                "name": product.name,
+                "image": product.image,
+            }
+        }
+        session.save()
+
+        response = self.client.post(
+            reverse("shops:checkout"),
+            data={
+                "action": "place_order",
+                "full_name": "Member Test",
+                "email": "member@example.com",
+                "phone": "0900000000",
+                "address": "HCM",
+                "payment_method": "WALLET",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Số dư ví hoàn trả không đủ")
+        self.assertFalse(Order.objects.filter(user=self.user, payment_method="WALLET").exists())
 
 
 class MysteryBoxExperienceTests(TestCase):

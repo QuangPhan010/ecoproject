@@ -235,13 +235,7 @@
                   name="payment_method"
                   id="payment_cod"
                   value="COD"
-                  {%
-                  if
-                  selected_payment=""
-                  ="COD"
-                  %}checked{%
-                  endif
-                  %}
+                  {% if selected_payment == "COD" %}checked{% endif %}
                 />
                 <label class="form-check-label" for="payment_cod">
                   Thanh toán khi nhận hàng (COD)
@@ -255,18 +249,36 @@
                   name="payment_method"
                   id="payment_bank"
                   value="BANK"
-                  {%
-                  if
-                  selected_payment=""
-                  ="BANK"
-                  %}checked{%
-                  endif
-                  %}
+                  {% if selected_payment == "BANK" %}checked{% endif %}
                 />
                 <label class="form-check-label" for="payment_bank">
                   Chuyển khoản ngân hàng
                 </label>
               </div>
+
+              {% if user.is_authenticated %}
+              <div class="form-check mt-1">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="payment_method"
+                  id="payment_wallet"
+                  value="WALLET"
+                  {% if selected_payment == "WALLET" %}checked{% endif %}
+                />
+                <label class="form-check-label" for="payment_wallet">
+                  Ví hoàn trả
+                </label>
+              </div>
+              <div class="small text-muted mt-2">
+                Số dư ví hoàn trả: <strong>{{ refund_wallet_balance|intcomma }}₫</strong>
+              </div>
+              {% if not can_pay_with_wallet %}
+              <div class="alert alert-light border small mt-2 mb-0">
+                Ví hoàn trả chỉ dùng được khi số dư đủ thanh toán toàn bộ đơn hàng.
+              </div>
+              {% endif %}
+              {% endif %}
             </div>
 
             <!-- PLACE ORDER -->

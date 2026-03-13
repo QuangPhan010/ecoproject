@@ -8,10 +8,10 @@ from django.urls import reverse
 from django.contrib.messages import get_messages
 from django.utils import timezone
 
-from shops.models import AfterSalesRequest, Category, Coupon, Order, OrderItem, OrderStatusLog, Product
+from shops.models import AfterSalesRequest, Category, Coupon, Order, OrderItem, OrderStatusLog, Product, UserNotification
 from shops.utils.order_expiry import expire_stale_pending_orders
 from shops.views import _apply_status_change
-from users.models import Profile
+from users.models import Profile, RefundWalletTransaction
 
 
 class OrderStockLifecycleTests(TestCase):
@@ -230,6 +230,23 @@ class OrderStockLifecycleTests(TestCase):
         self.assertEqual(product.stock, 8)
         self.assertEqual(product.reserved_stock, 0)
 
+    def test_apply_status_change_creates_user_notification(self):
+        order, _product = self._create_order_with_item(
+            payment_method="COD",
+            paid=False,
+            qty=1,
+            stock=5,
+            reserved_stock=1,
+        )
+
+        ok, error = _apply_status_change(order, "Processing", source="test")
+
+        self.assertTrue(ok, error)
+        notification = UserNotification.objects.get(user=self.user, notification_type=UserNotification.TYPE_ORDER_STATUS)
+        self.assertIn(f"Đơn hàng #{order.id}", notification.title)
+        self.assertIn("Pending", notification.message)
+        self.assertIn("Processing", notification.message)
+
     def test_user_cancel_order_requires_reason(self):
         self.client.force_login(self.user)
         order, product = self._create_order_with_item(
@@ -274,6 +291,165 @@ class OrderStockLifecycleTests(TestCase):
         self.assertEqual(order.status, "Cancelled")
         self.assertEqual(order.cancel_reason, "Đổi địa chỉ nhận hàng")
         self.assertEqual(product.reserved_stock, 0)
+
+
+class AfterSalesNotificationTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.user = self.user_model.objects.create_user(
+            username="buyer_aftersales",
+            password="pass12345",
+            email="buyer_aftersales@example.com",
+        )
+        self.staff = self.user_model.objects.create_user(
+            username="staff_aftersales",
+            password="pass12345",
+            email="staff_aftersales@example.com",
+            is_staff=True,
+        )
+        Profile.objects.create(user=self.user, phone="0900000001", address="HCM")
+        Profile.objects.create(user=self.staff, phone="0900000002", address="HCM")
+        self.order = Order.objects.create(
+            user=self.user,
+            address="HCM",
+            phone="0900000001",
+            total_price=100000,
+            status="Delivered",
+            payment_method="COD",
+            paid=True,
+        )
+
+    def _create_order_with_item(
+        self,
+        *,
+        status="Pending",
+        payment_method="COD",
+        paid=False,
+        qty=1,
+        stock=5,
+        reserved_stock=0,
+        coupon=None,
+        created_at=None,
+    ):
+        product = Product.objects.create(
+            name=f"AfterSales-{uuid.uuid4().hex[:8]}",
+            slug=f"after-sales-{uuid.uuid4().hex[:10]}",
+            price=100000,
+            image="https://example.com/p.jpg",
+            stock=stock,
+            reserved_stock=reserved_stock,
+            available=True,
+        )
+        order = Order.objects.create(
+            user=self.user,
+            address="HCM",
+            phone="0900000001",
+            total_price=qty * product.price,
+            status=status,
+            payment_method=payment_method,
+            paid=paid,
+            coupon=coupon,
+        )
+        if created_at is not None:
+            Order.objects.filter(id=order.id).update(created_at=created_at)
+            order.refresh_from_db()
+        OrderItem.objects.create(order=order, product=product, price=product.price, quantity=qty)
+        return order, product
+
+    def test_create_after_sales_request_notifies_staff(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("shops:create_after_sales_request", args=[self.order.id]),
+            {
+                "request_type": AfterSalesRequest.TYPE_RETURN,
+                "reason": "Sản phẩm bị lỗi",
+                "contact_name": "Buyer",
+                "contact_email": "buyer_aftersales@example.com",
+                "contact_phone": "0900000001",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            UserNotification.objects.filter(
+                user=self.staff,
+                notification_type=UserNotification.TYPE_AFTER_SALES,
+            ).exists()
+        )
+
+    def test_update_after_sales_request_notifies_customer(self):
+        record = AfterSalesRequest.objects.create(
+            order=self.order,
+            request_type=AfterSalesRequest.TYPE_RETURN,
+            reason="Sản phẩm bị lỗi",
+            requested_by=self.user,
+            contact_name="Buyer",
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("shops:update_after_sales_request", args=[record.id]),
+            {
+                "status": AfterSalesRequest.STATUS_APPROVED,
+                "refund_amount": 100000,
+                "resolution_note": "Đã duyệt hoàn trả",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        notification = UserNotification.objects.filter(
+            user=self.user,
+            notification_type=UserNotification.TYPE_AFTER_SALES,
+        ).latest("created_at")
+        self.assertIn("đã được cập nhật", notification.title)
+        self.assertIn("Đã duyệt", notification.message)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.refund_wallet_balance, 100000)
+        self.assertTrue(
+            RefundWalletTransaction.objects.filter(
+                user=self.user,
+                after_sales_request=record,
+                transaction_type=RefundWalletTransaction.TYPE_REFUND,
+            ).exists()
+        )
+
+    def test_approved_refund_is_only_credited_once(self):
+        record = AfterSalesRequest.objects.create(
+            order=self.order,
+            request_type=AfterSalesRequest.TYPE_REFUND,
+            reason="Xin hoàn tiền",
+            requested_by=self.user,
+            refund_amount=120000,
+            contact_name="Buyer",
+        )
+        self.client.force_login(self.staff)
+
+        first = self.client.post(
+            reverse("shops:update_after_sales_request", args=[record.id]),
+            {
+                "status": AfterSalesRequest.STATUS_APPROVED,
+                "refund_amount": 120000,
+                "resolution_note": "Duyệt lần 1",
+            },
+        )
+        second = self.client.post(
+            reverse("shops:update_after_sales_request", args=[record.id]),
+            {
+                "status": AfterSalesRequest.STATUS_APPROVED,
+                "refund_amount": 120000,
+                "resolution_note": "Duyệt lại",
+            },
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.refund_wallet_balance, 120000)
+        self.assertEqual(
+            RefundWalletTransaction.objects.filter(after_sales_request=record).count(),
+            1,
+        )
 
     def test_invalid_transition_is_blocked(self):
         order, _product = self._create_order_with_item(status="Pending")

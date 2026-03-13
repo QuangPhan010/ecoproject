@@ -25,6 +25,7 @@ class Profile(models.Model):
     standard_voucher_pity = models.PositiveSmallIntegerField(default=0)
     # Consecutive Premium Box turns without drawing a voucher.
     premium_voucher_pity = models.PositiveSmallIntegerField(default=0)
+    refund_wallet_balance = models.PositiveIntegerField(default=0)
 
     RANK_NEWBIE = "Newbie"
     RANK_EXPLORER = "Explorer"
@@ -153,6 +154,46 @@ class Profile(models.Model):
             self.rank,
             {"discount": 0, "max_discount": 0}
         )
+
+
+class RefundWalletTransaction(models.Model):
+    TYPE_REFUND = "REFUND"
+    TYPE_PAYMENT = "PAYMENT"
+    TYPE_CHOICES = (
+        (TYPE_REFUND, "Hoàn tiền vào ví"),
+        (TYPE_PAYMENT, "Thanh toán bằng ví"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="refund_wallet_transactions",
+    )
+    transaction_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    amount = models.PositiveIntegerField()
+    balance_after = models.PositiveIntegerField(default=0)
+    note = models.CharField(max_length=255, blank=True)
+    order = models.ForeignKey(
+        "shops.Order",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="refund_wallet_transactions",
+    )
+    after_sales_request = models.OneToOneField(
+        "shops.AfterSalesRequest",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="refund_wallet_transaction",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.transaction_type} - {self.amount}"
 
 
 class PointExchange(models.Model):

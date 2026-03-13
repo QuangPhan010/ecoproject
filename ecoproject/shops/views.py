@@ -10,14 +10,17 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog, AfterSalesRequest
+from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog, AfterSalesRequest, UserNotification
 from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm, CheckoutForm, AfterSalesRequestForm, AfterSalesRequestUpdateForm
 from .color_map import COLOR_MAP
+from .notifications import create_notification, notify_staff
 from django.utils import timezone
 from django.conf import settings
 import os
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
+import json
 from django.views.decorators.http import require_POST, require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from django.db import models
 from django.db.models import Count, Sum, F, Q, ExpressionWrapper, IntegerField, Prefetch
 from django.core.paginator import Paginator
@@ -32,6 +35,7 @@ from django.db.models.functions import Coalesce, TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
 from shops.discount_utils import calculate_rank_discount
 from xml.etree.ElementTree import Element, SubElement, tostring
+from .ai.chatbot import ecommerce_chatbot
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -711,6 +715,11 @@ def checkout(request):
     selected_payment = request.POST.get("payment_method", "COD")
     if selected_payment not in payment_choices:
         selected_payment = "COD"
+    refund_wallet_balance = 0
+    can_pay_with_wallet = False
+    if request.user.is_authenticated and hasattr(request.user, "profile"):
+        refund_wallet_balance = request.user.profile.refund_wallet_balance
+        can_pay_with_wallet = refund_wallet_balance >= totals["final_total"]
 
     # ===== POST =====
 
@@ -734,6 +743,16 @@ def checkout(request):
             if action == "place_order":
                 try:
                     with transaction.atomic():
+                        profile_obj = None
+                        if selected_payment == "WALLET":
+                            if not request.user.is_authenticated:
+                                raise ValueError("Vui lòng đăng nhập để thanh toán bằng ví hoàn trả.")
+                            from users.models import Profile, RefundWalletTransaction
+
+                            profile_obj = Profile.objects.select_for_update().get(user=request.user)
+                            if profile_obj.refund_wallet_balance < totals["final_total"]:
+                                raise ValueError("Số dư ví hoàn trả không đủ để thanh toán đơn hàng này.")
+
                         product_ids = [int(pid) for pid in cart.keys()]
                         products = (
                             Product.objects
@@ -800,6 +819,32 @@ def checkout(request):
                                     user=request.user
                                 )
 
+                        if selected_payment == "WALLET":
+                            ok, error_msg = _finalize_stock_when_paid(order)
+                            if not ok:
+                                raise ValueError(error_msg)
+
+                            profile_obj.refund_wallet_balance -= totals["final_total"]
+                            profile_obj.save(update_fields=["refund_wallet_balance"])
+                            RefundWalletTransaction.objects.create(
+                                user=request.user,
+                                transaction_type=RefundWalletTransaction.TYPE_PAYMENT,
+                                amount=totals["final_total"],
+                                balance_after=profile_obj.refund_wallet_balance,
+                                note=f"Thanh toán đơn hàng #{order.id}",
+                                order=order,
+                            )
+                            create_notification(
+                                user=request.user,
+                                notification_type=UserNotification.TYPE_SYSTEM,
+                                title="Thanh toán bằng ví hoàn trả thành công",
+                                message=(
+                                    f"Đơn hàng #{order.id} đã được thanh toán bằng ví hoàn trả. "
+                                    f"Số dư còn lại: {profile_obj.refund_wallet_balance}đ."
+                                ),
+                                target_url=reverse("shops:order_detail", args=[order.id]),
+                            )
+
                 except ValueError as exc:
                     messages.error(request, str(exc))
                     return redirect("shops:checkout")
@@ -854,6 +899,8 @@ def checkout(request):
         "checkout_form": checkout_form,
         "coupon_form": coupon_form,
         "selected_payment": selected_payment,
+        "refund_wallet_balance": refund_wallet_balance,
+        "can_pay_with_wallet": can_pay_with_wallet,
     }
 
     return render(
@@ -1173,6 +1220,19 @@ def _apply_status_change(order, new_status, changed_by=None, source="system"):
                 to_status=new_status,
                 source=source,
             )
+            if locked_order.user_id:
+                status_labels = dict(Order.STATUS_CHOICES)
+                create_notification(
+                    user=locked_order.user,
+                    notification_type=UserNotification.TYPE_ORDER_STATUS,
+                    title=f"Đơn hàng #{locked_order.id} đã đổi trạng thái",
+                    message=(
+                        f"Đơn hàng #{locked_order.id} chuyển từ "
+                        f"{status_labels.get(old_status, old_status)} sang "
+                        f"{status_labels.get(new_status, new_status)}."
+                    ),
+                    target_url=reverse("shops:order_detail", args=[locked_order.id]),
+                )
 
         if old_status != "Delivered" and new_status == "Delivered" and locked_order.user_id:
             update_user_rank(locked_order.user)
@@ -1293,6 +1353,22 @@ def create_after_sales_request(request, order_id):
         after_sales_request.order = order
         after_sales_request.requested_by = request.user
         after_sales_request.save()
+        request_type_label = after_sales_request.get_request_type_display()
+        detail_url = reverse("shops:order_detail", args=[order.id])
+        if order.user_id:
+            create_notification(
+                user=order.user,
+                notification_type=UserNotification.TYPE_AFTER_SALES,
+                title=f"Đã ghi nhận yêu cầu {request_type_label.lower()}",
+                message=f"Yêu cầu #{after_sales_request.id} cho đơn #{order.id} đang chờ xử lý.",
+                target_url=detail_url,
+            )
+        notify_staff(
+            notification_type=UserNotification.TYPE_AFTER_SALES,
+            title=f"Có yêu cầu {request_type_label.lower()} mới",
+            message=f"Đơn #{order.id} vừa gửi yêu cầu #{after_sales_request.id}.",
+            target_url=detail_url,
+        )
         messages.success(request, "Đã gửi yêu cầu đổi/trả/hoàn tiền.")
     else:
         messages.error(request, "Thông tin yêu cầu hậu mãi chưa hợp lệ.")
@@ -1312,15 +1388,65 @@ def update_after_sales_request(request, request_id):
 
     form = AfterSalesRequestUpdateForm(request.POST, instance=after_sales_request)
     if form.is_valid():
-        record = form.save(commit=False)
-        record.processed_by = request.user
-        record.processed_at = timezone.now()
-        record.save()
+        with transaction.atomic():
+            record = form.save(commit=False)
+            record.processed_by = request.user
+            record.processed_at = timezone.now()
+            record.save()
+
+            wallet_credit_message = ""
+            if (
+                record.status == AfterSalesRequest.STATUS_APPROVED
+                and record.refund_amount > 0
+                and record.order.user_id
+            ):
+                from users.models import Profile, RefundWalletTransaction
+
+                existing_wallet_credit = RefundWalletTransaction.objects.filter(
+                    after_sales_request=record
+                ).exists()
+                if not existing_wallet_credit:
+                    profile_obj = Profile.objects.select_for_update().get(user=record.order.user)
+                    profile_obj.refund_wallet_balance += record.refund_amount
+                    profile_obj.save(update_fields=["refund_wallet_balance"])
+                    RefundWalletTransaction.objects.create(
+                        user=record.order.user,
+                        transaction_type=RefundWalletTransaction.TYPE_REFUND,
+                        amount=record.refund_amount,
+                        balance_after=profile_obj.refund_wallet_balance,
+                        note=f"Hoàn tiền cho yêu cầu #{record.id} của đơn #{record.order_id}",
+                        order=record.order,
+                        after_sales_request=record,
+                    )
+                    wallet_credit_message = (
+                        f" Số tiền {record.refund_amount}đ đã được cộng vào ví hoàn trả."
+                    )
+
+            if record.order.user_id:
+                status_label = record.get_status_display()
+                create_notification(
+                    user=record.order.user,
+                    notification_type=UserNotification.TYPE_AFTER_SALES,
+                    title=f"Yêu cầu hậu mãi #{record.id} đã được cập nhật",
+                    message=(
+                        f"Yêu cầu {record.get_request_type_display().lower()} của đơn "
+                        f"#{record.order_id} hiện ở trạng thái: {status_label}."
+                        f"{wallet_credit_message}"
+                    ),
+                    target_url=reverse("shops:order_detail", args=[record.order_id]),
+                )
         messages.success(request, f"Đã cập nhật yêu cầu #{record.id}.")
     else:
         messages.error(request, f"Không thể cập nhật yêu cầu #{after_sales_request.id}.")
 
     return redirect("shops:order_detail", order_id=after_sales_request.order_id)
+
+
+@login_required
+@require_POST
+def mark_notifications_read(request):
+    UserNotification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return JsonResponse({"ok": True})
 
 def _can_view_order(request, order):
     return (
@@ -2446,3 +2572,55 @@ def apply_best_coupon(request):
         messages.warning(request, "Không có coupon phù hợp")
 
     return redirect("shops:checkout")
+
+@csrf_exempt
+@require_POST
+def ai_chatbot(request):
+    try:
+        data = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "reply": "Du lieu gui len khong hop le.",
+            "error": "Invalid JSON payload.",
+        }, status=400)
+
+    message = (data.get("message") or "").strip()
+    if not message:
+        return JsonResponse({
+            "reply": "Vui long nhap noi dung can hoi.",
+            "error": "Message is required.",
+        }, status=400)
+
+    try:
+        result = ecommerce_chatbot(
+            message,
+            user=request.user,
+            cart=request.session.get("cart", {}),
+        )
+    except RuntimeError as exc:
+        logger.warning("AI chatbot unavailable: %s", exc)
+        return JsonResponse({
+            "reply": "Chatbot AI hien khong kha dung.",
+            "error": str(exc),
+        }, status=503)
+    except Exception as exc:
+        logger.exception("AI chatbot failed unexpectedly")
+        return JsonResponse({
+            "reply": "Chatbot gap loi trong qua trinh xu ly.",
+            "error": str(exc),
+        }, status=500)
+
+    products = []
+    for product in result.get("products", []):
+        products.append(
+            {
+                "name": product.name,
+                "slug": product.slug,
+                "detail_url": reverse("shops:detail", kwargs={"slug": product.slug}),
+            }
+        )
+
+    return JsonResponse({
+        "reply": result.get("reply", ""),
+        "products": products,
+    })

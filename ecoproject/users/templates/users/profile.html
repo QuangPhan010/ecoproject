@@ -203,9 +203,57 @@
               <small class="text-muted">Lượt minigame</small>
             </div>
           </div>
+
+          <div class="col-md-3 col-6">
+            <div class="stat-box">
+              <strong>{{ refund_wallet_balance|intcomma }}₫</strong><br />
+              <small class="text-muted">Ví hoàn trả</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-6">
+            <div class="section-title">Ví hoàn trả</div>
+            <div class="card border-0 bg-light">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="text-muted">Số dư hiện tại</span>
+                  <strong class="fs-5">{{ refund_wallet_balance|intcomma }}₫</strong>
+                </div>
+                <div class="small text-muted">
+                  Tiền hoàn trả được cộng vào đây khi admin duyệt yêu cầu refund. Bạn chỉ có thể dùng ví khi số dư đủ trả toàn bộ đơn hàng.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="section-title">Lịch sử ví hoàn trả</div>
+            <div class="card border-0 bg-light">
+              <div class="card-body">
+                {% for tx in refund_wallet_transactions %}
+                <div class="d-flex justify-content-between gap-3 py-2 border-bottom">
+                  <div>
+                    <div class="fw-semibold">{{ tx.get_transaction_type_display }}</div>
+                    <div class="small text-muted">{{ tx.note }}</div>
+                    <div class="small text-muted">{{ tx.created_at|date:"d/m/Y H:i" }}</div>
+                  </div>
+                  <div class="text-end">
+                    <div class="fw-semibold {% if tx.transaction_type == 'REFUND' %}text-success{% else %}text-danger{% endif %}">
+                      {% if tx.transaction_type == "REFUND" %}+{% else %}-{% endif %}{{ tx.amount|intcomma }}₫
+                    </div>
+                    <div class="small text-muted">Số dư: {{ tx.balance_after|intcomma }}₫</div>
+                  </div>
+                </div>
+                {% empty %}
+                <div class="text-muted small">Chưa có giao dịch ví hoàn trả nào.</div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
   </div>
 </div>
 

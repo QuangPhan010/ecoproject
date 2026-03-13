@@ -167,6 +167,7 @@ class Order(models.Model):
     PAYMENT_CHOICES = (
         ('COD', 'Thanh toán khi nhận hàng'),
         ('BANK', 'Chuyển khoản ngân hàng'),
+        ('WALLET', 'Thanh toán bằng ví hoàn trả'),
         ('MOMO', 'Chuyển khoản ví điện tử MoMo'),
         ('VNPAY', 'Chuyển khoản ví điện tử VNPAY'),
     )
@@ -313,7 +314,40 @@ class AfterSalesRequest(models.Model):
         return f"After-sales #{self.id} - Order #{self.order_id}"
 
 
-from django.core.validators import MinValueValidator, MaxValueValidator
+class UserNotification(models.Model):
+    TYPE_ORDER_STATUS = "ORDER_STATUS"
+    TYPE_AFTER_SALES = "AFTER_SALES"
+    TYPE_VOUCHER = "VOUCHER"
+    TYPE_SYSTEM = "SYSTEM"
+    TYPE_CHOICES = (
+        (TYPE_ORDER_STATUS, "Trạng thái đơn hàng"),
+        (TYPE_AFTER_SALES, "Hậu mãi"),
+        (TYPE_VOUCHER, "Voucher"),
+        (TYPE_SYSTEM, "Hệ thống"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    notification_type = models.CharField(max_length=30, choices=TYPE_CHOICES, default=TYPE_SYSTEM)
+    title = models.CharField(max_length=160)
+    message = models.TextField(blank=True)
+    target_url = models.CharField(max_length=255, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "is_read", "-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["notification_type", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Notification #{self.id} - {self.user}"
 
 
 class Coupon(models.Model):

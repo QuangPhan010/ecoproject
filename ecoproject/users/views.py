@@ -18,6 +18,7 @@ from .models import (
     RewardVoucherOption,
     MysteryBoxRewardOption,
     PasswordResetOTP,
+    RefundWalletTransaction,
 )
 from django.contrib import messages
 from django.contrib.auth.models import Group, User
@@ -34,6 +35,8 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from datetime import timedelta
+from shops.notifications import create_notification
+from shops.models import UserNotification
 import uuid
 import random
 
@@ -404,6 +407,7 @@ def profile(request):
     )
     rank_info = get_next_rank_info(profile_obj.lifetime_points)
     recent_exchanges = user.point_exchanges.all()[:8]
+    refund_wallet_transactions = user.refund_wallet_transactions.all()[:8]
 
     context = {
         "total_orders": total_orders,
@@ -413,8 +417,10 @@ def profile(request):
         "lifetime_points": profile_obj.lifetime_points,
         "rank": profile_obj.rank,
         "minigame_plays": profile_obj.minigame_plays,
+        "refund_wallet_balance": profile_obj.refund_wallet_balance,
         "rank_info": rank_info,
-        "recent_exchanges": recent_exchanges
+        "recent_exchanges": recent_exchanges,
+        "refund_wallet_transactions": refund_wallet_transactions,
     }
     
     return render(request, "users/profile.html", context)
@@ -675,6 +681,13 @@ def _apply_mystery_reward(profile_obj, user, reward):
             max_discount=reward.get("voucher_max_discount", 0),
             usage_limit=1,
             active=True
+        )
+        create_notification(
+            user=user,
+            notification_type=UserNotification.TYPE_VOUCHER,
+            title="Bạn vừa nhận được voucher mới",
+            message=f"Voucher {coupon.code} giảm {coupon.discount}% đã được thêm vào ví của bạn.",
+            target_url=reverse("users:rewards"),
         )
         extra = coupon.code
 
@@ -942,6 +955,13 @@ def redeem_points_voucher(request):
             max_discount=option.max_discount,
             usage_limit=1,
             active=True
+        )
+        create_notification(
+            user=request.user,
+            notification_type=UserNotification.TYPE_VOUCHER,
+            title="Đổi điểm thành công",
+            message=f"Voucher {coupon.code} giảm {coupon.discount}% đã được thêm vào ví của bạn.",
+            target_url=reverse("users:rewards"),
         )
 
         PointExchange.objects.create(

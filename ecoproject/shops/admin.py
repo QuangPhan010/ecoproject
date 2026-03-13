@@ -1,7 +1,8 @@
 from django.contrib import admin, messages
 from .models import (
     Product, FlashSale, ProductOption, ProductColor, Category,
-    Order, OrderItem, Coupon, WishlistItem, OrderStatusLog, AfterSalesRequest
+    Order, OrderItem, Coupon, WishlistItem, OrderStatusLog, AfterSalesRequest,
+    UserNotification,
 )
 from .views import _apply_status_change
 
@@ -157,3 +158,10 @@ class AfterSalesRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("request_type", "status", "created_at")
     search_fields = ("order__id", "contact_name", "contact_email", "contact_phone")
+
+
+@admin.register(UserNotification)
+class UserNotificationAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "notification_type", "title", "is_read", "created_at")
+    list_filter = ("notification_type", "is_read", "created_at")
+    search_fields = ("user__username", "user__email", "title", "message")

@@ -34,6 +34,30 @@
         font-size: 0.65rem;
       }
 
+      .mini-badge {
+        margin-left: 4px;
+        font-size: 0.65rem;
+      }
+
+      .notification-menu {
+        min-width: 340px;
+        max-width: min(92vw, 380px);
+      }
+
+      .notification-item {
+        white-space: normal;
+      }
+
+      .notification-title {
+        font-weight: 600;
+        color: #1f2937;
+      }
+
+      .notification-time {
+        font-size: 0.78rem;
+        color: #6b7280;
+      }
+
       /* ===== FOOTER ===== */
       .site-footer {
         background: rgba(255, 255, 255, 0.85);
@@ -187,6 +211,55 @@
             </li>
 
             {% if request.user.is_authenticated %}
+            <li class="nav-item dropdown me-2">
+              <a
+                class="nav-link position-relative"
+                href="#"
+                role="button"
+                data-bs-toggle="dropdown"
+                data-notification-dropdown="true"
+              >
+                <i class="bi bi-bell fs-5"></i>
+                {% if navbar_unread_notifications_count %}
+                <span class="badge bg-danger rounded-pill cart-badge"
+                  >{{ navbar_unread_notifications_count }}</span
+                >
+                {% endif %}
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end shadow notification-menu">
+                <li>
+                  <div class="dropdown-item-text fw-semibold">Thông báo mới</div>
+                </li>
+                <li><hr class="dropdown-divider" /></li>
+                {% for notification in navbar_notifications %}
+                <li>
+                  {% if notification.target_url %}
+                  <a class="dropdown-item notification-item" href="{{ notification.target_url }}">
+                    <div class="notification-title">{{ notification.title }}</div>
+                    {% if notification.message %}
+                    <div class="small">{{ notification.message }}</div>
+                    {% endif %}
+                    <div class="notification-time">{{ notification.created_at|date:"d/m/Y H:i" }}</div>
+                  </a>
+                  {% else %}
+                  <div class="dropdown-item-text notification-item">
+                    <div class="notification-title">{{ notification.title }}</div>
+                    {% if notification.message %}
+                    <div class="small">{{ notification.message }}</div>
+                    {% endif %}
+                    <div class="notification-time">{{ notification.created_at|date:"d/m/Y H:i" }}</div>
+                  </div>
+                  {% endif %}
+                </li>
+                {% empty %}
+                <li>
+                  <div class="dropdown-item-text text-muted small">
+                    Chưa có thông báo nào.
+                  </div>
+                </li>
+                {% endfor %}
+              </ul>
+            </li>
             <li class="nav-item dropdown me-2">
               <a
                 class="nav-link dropdown-toggle"
@@ -369,6 +442,32 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      (() => {
+        const dropdown = document.querySelector("[data-notification-dropdown='true']");
+        if (!dropdown) {
+          return;
+        }
+
+        const getCookie = (name) => {
+          const value = `; ${document.cookie}`;
+          const parts = value.split(`; ${name}=`);
+          if (parts.length === 2) {
+            return parts.pop().split(";").shift();
+          }
+          return "";
+        };
+
+        dropdown.addEventListener("show.bs.dropdown", () => {
+          fetch("{% url 'shops:mark_notifications_read' %}", {
+            method: "POST",
+            headers: {
+              "X-CSRFToken": getCookie("csrftoken"),
+            },
+          }).catch(() => {});
+        });
+      })();
+    </script>
 
 
     {% block extra_js %}{% endblock %}
