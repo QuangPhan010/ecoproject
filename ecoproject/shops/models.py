@@ -130,12 +130,22 @@ class ReviewReaction(models.Model):
 
 
 class Order(models.Model):
+    STATUS_PENDING = "Pending"
+    STATUS_PROCESSING = "Processing"
+    STATUS_SHIPPED = "Shipped"
+    STATUS_DELIVERED = "Delivered"
+    STATUS_CANCELLED = "Cancelled"
+    STATUS_RETURN_REQUESTED = "ReturnRequested"
+    STATUS_RETURNED = "Returned"
+
     STATUS_CHOICES = (
-        ('Pending', 'Pending'),
-        ('Processing', 'Processing'),
-        ('Shipped', 'Shipped'),
-        ('Delivered', 'Delivered'),
-        ('Cancelled', 'Cancelled'),
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_SHIPPED, "Shipped"),
+        (STATUS_DELIVERED, "Delivered"),
+        (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_RETURN_REQUESTED, "Yêu cầu hoàn trả"),
+        (STATUS_RETURNED, "Đã hoàn trả"),
     )
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='orders', null=True, blank=True)
@@ -147,7 +157,7 @@ class Order(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     paid = models.BooleanField(default=False)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     shipping_method = models.CharField(max_length=50, default='Standard')
     shipping_cost = models.IntegerField(default=0)
     coupon = models.ForeignKey('Coupon', on_delete=models.SET_NULL, null=True, blank=True)
@@ -312,6 +322,22 @@ class AfterSalesRequest(models.Model):
 
     def __str__(self):
         return f"After-sales #{self.id} - Order #{self.order_id}"
+
+
+class AfterSalesRequestImage(models.Model):
+    after_sales_request = models.ForeignKey(
+        AfterSalesRequest,
+        on_delete=models.CASCADE,
+        related_name="images",
+    )
+    image = models.ImageField(upload_to="after_sales/%Y/%m/%d/")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-uploaded_at",)
+
+    def __str__(self):
+        return f"Image #{self.id} for request #{self.after_sales_request_id}"
 
 
 class UserNotification(models.Model):

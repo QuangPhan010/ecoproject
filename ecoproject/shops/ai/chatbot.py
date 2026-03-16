@@ -105,11 +105,27 @@ STOPWORDS = {
     "pho",
     "bien",
 }
+ORDER_STATUS_LABELS = {
+    "Pending": "Chờ xử lý",
+    "Processing": "Đang xử lý",
+    "Shipped": "Đang giao",
+    "Delivered": "Hoàn thành",
+    "Cancelled": "Đã hủy",
+}
+PAYMENT_METHOD_LABELS = {
+    "COD": "Thanh toán khi nhận hàng",
+    "BANK": "Chuyển khoản ngân hàng",
+    "WALLET": "Thanh toán bằng ví hoàn trả",
+    "MOMO": "Ví MoMo",
+    "VNPAY": "Ví VNPAY",
+}
+ORDER_CHAT_STATE_KEY = "awaiting_order_code"
 
 
 def _normalize_text(value):
     text = unicodedata.normalize("NFD", value or "")
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.replace("đ", "d").replace("Đ", "D")
     return text.lower().strip()
 
 
@@ -223,6 +239,118 @@ def _extract_order_ids(message):
 
 def _extract_tracking_codes(message):
     return re.findall(r"\bQSHOP\d{4,}\b", (message or "").upper())
+
+
+def _extract_order_reference_codes(message):
+    candidates = re.findall(r"\b[A-Z0-9-]{4,20}\b", (message or "").upper())
+    return [
+        candidate
+        for candidate in candidates
+        if any(ch.isalpha() for ch in candidate) and any(ch.isdigit() for ch in candidate)
+    ]
+
+
+def _has_order_reference(message):
+    return bool(_extract_order_ids(message) or _extract_tracking_codes(message) or _extract_order_reference_codes(message))
+
+
+def _is_order_question(message):
+    normalized = _normalize_text(message)
+    return any(token in normalized for token in ORDER_HINTS)
+
+
+def _order_lookup_queryset(user):
+    qs = (
+        Order.objects.all()
+        .prefetch_related("status_logs")
+        .order_by("-created_at")
+    )
+    if getattr(user, "is_authenticated", False) and not (
+        getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+    ):
+        qs = qs.filter(user=user)
+    return qs
+
+
+def _find_matching_order(user, message):
+    qs = _order_lookup_queryset(user)
+    order_ids = _extract_order_ids(message)
+    tracking_codes = _extract_tracking_codes(message)
+    reference_codes = _extract_order_reference_codes(message)
+
+    if order_ids:
+        order = qs.filter(id__in=order_ids).first()
+        if order:
+            return order
+
+    if tracking_codes:
+        order = qs.filter(tracking_code__in=tracking_codes).first()
+        if order:
+            return order
+
+    for code in reference_codes:
+        order = qs.filter(tracking_code__iexact=code).first()
+        if order:
+            return order
+
+    return None
+
+
+def _format_order_status_reply(order):
+    status_label = ORDER_STATUS_LABELS.get(order.status, order.status)
+    payment_label = PAYMENT_METHOD_LABELS.get(order.payment_method, order.payment_method)
+    latest_log = order.status_logs.order_by("-changed_at").first()
+
+    lines = [
+        f"Đơn hàng #{order.id} hiện đang ở trạng thái: {status_label}.",
+        f"Mã đơn: {order.tracking_code or f'#{order.id}'}.",
+        f"Phương thức thanh toán: {payment_label}.",
+        f"Tạo lúc: {order.created_at.strftime('%d/%m/%Y %H:%M')}.",
+    ]
+    if latest_log:
+        from_label = ORDER_STATUS_LABELS.get(latest_log.from_status, latest_log.from_status)
+        to_label = ORDER_STATUS_LABELS.get(latest_log.to_status, latest_log.to_status)
+        lines.append(
+            f"Cập nhật gần nhất: {from_label} -> {to_label} lúc {latest_log.changed_at.strftime('%d/%m/%Y %H:%M')}."
+        )
+    return "\n".join(lines)
+
+
+def handle_order_status_chat(message, user=None, conversation_state=None):
+    conversation_state = conversation_state or {}
+    awaiting_order_code = bool(conversation_state.get(ORDER_CHAT_STATE_KEY))
+    is_order_question = _is_order_question(message)
+
+    if not awaiting_order_code and not is_order_question:
+        return None
+
+    if not getattr(user, "is_authenticated", False):
+        return {
+            "reply": "Bạn cần đăng nhập và gửi mã đơn hàng để tôi kiểm tra trạng thái.",
+            "products": [],
+            "conversation_state": {},
+        }
+
+    if not _has_order_reference(message):
+        return {
+            "reply": "Bạn hãy nhập mã đơn hàng.",
+            "products": [],
+            "conversation_state": {ORDER_CHAT_STATE_KEY: True},
+        }
+
+    order = _find_matching_order(user, message)
+    if not order:
+        return {
+            "reply": "Tôi chưa tìm thấy đơn hàng phù hợp. Bạn hãy kiểm tra lại mã đơn hàng rồi gửi lại.",
+            "products": [],
+            "conversation_state": {ORDER_CHAT_STATE_KEY: True},
+        }
+
+    return {
+        "reply": _format_order_status_reply(order),
+        "products": [],
+        "conversation_state": {},
+    }
 
 
 def _build_order_tracking_context(user, message):

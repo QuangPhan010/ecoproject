@@ -10,8 +10,8 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog, AfterSalesRequest, UserNotification
-from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm, CheckoutForm, AfterSalesRequestForm, AfterSalesRequestUpdateForm
+from .models import Product, FlashSale, ProductColor, Category, Review, ReviewReaction, Order, OrderItem, Coupon, CouponUsage, WishlistItem, OrderStatusLog, AfterSalesRequest, UserNotification, AfterSalesRequestImage
+from .forms import ProductForm, ReviewForm, CouponForm, CouponCreateForm, CheckoutForm, AfterSalesRequestForm, AfterSalesRequestUpdateForm, RefundRequestForm
 from .color_map import COLOR_MAP
 from .notifications import create_notification, notify_staff
 from django.utils import timezone
@@ -35,7 +35,7 @@ from django.db.models.functions import Coalesce, TruncMonth, TruncDay, TruncHour
 from collections import OrderedDict
 from shops.discount_utils import calculate_rank_discount
 from xml.etree.ElementTree import Element, SubElement, tostring
-from .ai.chatbot import ecommerce_chatbot
+from .ai.chatbot import ORDER_CHAT_STATE_KEY, ecommerce_chatbot, handle_order_status_chat
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -1083,9 +1083,6 @@ def order_detail(request, order_id):
         qr_shipper_url = request.build_absolute_uri(path)
 
     after_sales_requests = order.after_sales_requests.all()
-    after_sales_form = None
-    if not (request.user.is_staff or request.user.is_superuser) and _can_create_after_sales_request(order):
-        after_sales_form = AfterSalesRequestForm(order=order)
 
     return render(request, "shops/order_detail.html", {
         "order": order,
@@ -1093,7 +1090,6 @@ def order_detail(request, order_id):
         "is_admin": request.user.is_staff or request.user.is_superuser,
         "qr_shipper_url": qr_shipper_url,
         "after_sales_requests": after_sales_requests,
-        "after_sales_form": after_sales_form,
         "can_create_after_sales_request": _can_create_after_sales_request(order),
     })
 
@@ -1172,11 +1168,34 @@ def _release_reserved_stock(order):
 
 
 ALLOWED_STATUS_TRANSITIONS = {
-    "Pending": {"Pending", "Processing", "Cancelled"},
-    "Processing": {"Processing", "Shipped", "Cancelled"},
-    "Shipped": {"Shipped", "Delivered"},
-    "Delivered": {"Delivered"},
-    "Cancelled": {"Cancelled"},
+    Order.STATUS_PENDING: {
+        Order.STATUS_PENDING,
+        Order.STATUS_PROCESSING,
+        Order.STATUS_CANCELLED,
+    },
+    Order.STATUS_PROCESSING: {
+        Order.STATUS_PROCESSING,
+        Order.STATUS_SHIPPED,
+        Order.STATUS_CANCELLED,
+    },
+    Order.STATUS_SHIPPED: {
+        Order.STATUS_SHIPPED,
+        Order.STATUS_DELIVERED,
+    },
+    Order.STATUS_DELIVERED: {
+        Order.STATUS_DELIVERED,
+        Order.STATUS_RETURN_REQUESTED,
+    },
+    Order.STATUS_RETURN_REQUESTED: {
+        Order.STATUS_RETURN_REQUESTED,
+        Order.STATUS_RETURNED,
+    },
+    Order.STATUS_RETURNED: {
+        Order.STATUS_RETURNED,
+    },
+    Order.STATUS_CANCELLED: {
+        Order.STATUS_CANCELLED,
+    },
 }
 
 
@@ -1195,8 +1214,12 @@ def _apply_status_change(order, new_status, changed_by=None, source="system"):
             return False, f"Không thể chuyển trạng thái từ {old_status} sang {new_status}."
 
         should_mark_paid = (
-            (locked_order.payment_method == "COD" and new_status == "Delivered")
-            or (locked_order.payment_method != "COD" and new_status in {"Processing", "Shipped", "Delivered"})
+            (locked_order.payment_method == "COD" and new_status == Order.STATUS_DELIVERED)
+            or (
+                locked_order.payment_method != "COD"
+                and new_status
+                in {Order.STATUS_PROCESSING, Order.STATUS_SHIPPED, Order.STATUS_DELIVERED}
+            )
         )
 
         if should_mark_paid and not locked_order.paid:
@@ -1205,7 +1228,7 @@ def _apply_status_change(order, new_status, changed_by=None, source="system"):
                 return False, error_msg
             locked_order.refresh_from_db(fields=["paid", "updated_at"])
 
-        if new_status == "Cancelled":
+        if new_status == Order.STATUS_CANCELLED:
             if locked_order.paid:
                 return False, "Đơn đã thanh toán, không thể huỷ theo luồng hiện tại."
             _release_reserved_stock(locked_order)
@@ -1234,7 +1257,11 @@ def _apply_status_change(order, new_status, changed_by=None, source="system"):
                     target_url=reverse("shops:order_detail", args=[locked_order.id]),
                 )
 
-        if old_status != "Delivered" and new_status == "Delivered" and locked_order.user_id:
+        if (
+            old_status != Order.STATUS_DELIVERED
+            and new_status == Order.STATUS_DELIVERED
+            and locked_order.user_id
+        ):
             update_user_rank(locked_order.user)
 
         order.status = locked_order.status
@@ -1377,6 +1404,98 @@ def create_after_sales_request(request, order_id):
 
 
 @login_required
+def refund_request_create(request, order_id):
+    order = get_object_or_404(Order.objects.select_related("user"), id=order_id)
+    if not _can_manage_after_sales(request, order):
+        return HttpResponseForbidden("Bạn không có quyền thao tác với đơn hàng này.")
+    if not _can_create_after_sales_request(order):
+        messages.error(request, "Chỉ có thể gửi yêu cầu sau khi đơn hàng đã hoàn thành.")
+        return redirect("shops:order_detail", order_id=order.id)
+
+    if request.method == "POST":
+        form = RefundRequestForm(request.POST, order=order)
+        if form.is_valid():
+            with transaction.atomic():
+                after_sales_request = form.save(commit=False)
+                after_sales_request.order = order
+                after_sales_request.requested_by = request.user
+                after_sales_request.request_type = AfterSalesRequest.TYPE_RETURN
+                after_sales_request.save()
+
+                images = request.FILES.getlist("images")
+                for image in images:
+                    AfterSalesRequestImage.objects.create(
+                        after_sales_request=after_sales_request,
+                        image=image,
+                    )
+
+                ok, error_msg = _apply_status_change(
+                    order,
+                    Order.STATUS_RETURN_REQUESTED,
+                    changed_by=request.user,
+                    source="user_return_request",
+                )
+                if not ok:
+                    messages.error(
+                        request,
+                        f"Đã tạo yêu cầu hoàn trả nhưng không thể cập nhật trạng thái đơn: {error_msg}",
+                    )
+
+            request_type_label = after_sales_request.get_request_type_display()
+            detail_url = reverse("shops:order_detail", args=[order.id])
+            if order.user_id:
+                create_notification(
+                    user=order.user,
+                    notification_type=UserNotification.TYPE_AFTER_SALES,
+                    title=f"Đã ghi nhận yêu cầu {request_type_label.lower()}",
+                    message=f"Yêu cầu #{after_sales_request.id} cho đơn #{order.id} đang chờ xử lý.",
+                    target_url=detail_url,
+                )
+            notify_staff(
+                notification_type=UserNotification.TYPE_AFTER_SALES,
+                title=f"Có yêu cầu {request_type_label.lower()} mới",
+                message=f"Đơn #{order.id} vừa gửi yêu cầu #{after_sales_request.id}.",
+                target_url=detail_url,
+            )
+            messages.success(request, "Đã gửi yêu cầu trả hàng/hoàn tiền.")
+            return redirect("shops:order_detail", order_id=order.id)
+        messages.error(request, "Thông tin yêu cầu hoàn trả chưa hợp lệ.")
+    else:
+        form = RefundRequestForm(order=order)
+
+    return render(
+        request,
+        "shops/refund_request_form.html",
+        {
+            "order": order,
+            "form": form,
+        },
+    )
+
+
+@login_required
+def refund_request_list(request):
+    qs = (
+        AfterSalesRequest.objects.select_related("order", "order__user")
+        .prefetch_related("images")
+        .filter(request_type__in=[AfterSalesRequest.TYPE_RETURN, AfterSalesRequest.TYPE_REFUND])
+        .order_by("-created_at")
+    )
+    is_admin = request.user.is_staff or request.user.is_superuser
+    if not is_admin:
+        qs = qs.filter(order__user=request.user)
+
+    return render(
+        request,
+        "shops/refund_request_list.html",
+        {
+            "requests": qs,
+            "is_admin": is_admin,
+        },
+    )
+
+
+@login_required
 @require_POST
 def update_after_sales_request(request, request_id):
     after_sales_request = get_object_or_404(
@@ -1395,31 +1514,40 @@ def update_after_sales_request(request, request_id):
             record.save()
 
             wallet_credit_message = ""
-            if (
-                record.status == AfterSalesRequest.STATUS_APPROVED
-                and record.refund_amount > 0
-                and record.order.user_id
-            ):
+            if record.status == AfterSalesRequest.STATUS_APPROVED:
                 from users.models import Profile, RefundWalletTransaction
 
-                existing_wallet_credit = RefundWalletTransaction.objects.filter(
-                    after_sales_request=record
-                ).exists()
-                if not existing_wallet_credit:
-                    profile_obj = Profile.objects.select_for_update().get(user=record.order.user)
-                    profile_obj.refund_wallet_balance += record.refund_amount
-                    profile_obj.save(update_fields=["refund_wallet_balance"])
-                    RefundWalletTransaction.objects.create(
-                        user=record.order.user,
-                        transaction_type=RefundWalletTransaction.TYPE_REFUND,
-                        amount=record.refund_amount,
-                        balance_after=profile_obj.refund_wallet_balance,
-                        note=f"Hoàn tiền cho yêu cầu #{record.id} của đơn #{record.order_id}",
-                        order=record.order,
-                        after_sales_request=record,
-                    )
-                    wallet_credit_message = (
-                        f" Số tiền {record.refund_amount}đ đã được cộng vào ví hoàn trả."
+                if record.refund_amount > 0 and record.order.user_id:
+                    existing_wallet_credit = RefundWalletTransaction.objects.filter(
+                        after_sales_request=record
+                    ).exists()
+                    if not existing_wallet_credit:
+                        profile_obj = Profile.objects.select_for_update().get(user=record.order.user)
+                        profile_obj.refund_wallet_balance += record.refund_amount
+                        profile_obj.save(update_fields=["refund_wallet_balance"])
+                        RefundWalletTransaction.objects.create(
+                            user=record.order.user,
+                            transaction_type=RefundWalletTransaction.TYPE_REFUND,
+                            amount=record.refund_amount,
+                            balance_after=profile_obj.refund_wallet_balance,
+                            note=f"Hoàn tiền cho yêu cầu #{record.id} của đơn #{record.order_id}",
+                            order=record.order,
+                            after_sales_request=record,
+                        )
+                        wallet_credit_message = (
+                            f" Số tiền {record.refund_amount}đ đã được cộng vào ví hoàn trả."
+                        )
+
+                ok, error_msg = _apply_status_change(
+                    record.order,
+                    Order.STATUS_RETURNED,
+                    changed_by=request.user,
+                    source="after_sales_approved",
+                )
+                if not ok:
+                    messages.error(
+                        request,
+                        f"Không thể cập nhật trạng thái đơn #{record.order_id} sang 'Đã hoàn trả': {error_msg}",
                     )
 
             if record.order.user_id:
@@ -1463,7 +1591,7 @@ def _can_manage_after_sales(request, order):
 
 
 def _can_create_after_sales_request(order):
-    return order.status == "Delivered"
+    return order.status == Order.STATUS_DELIVERED
 
 
 def _mask_phone(phone):
@@ -2590,6 +2718,27 @@ def ai_chatbot(request):
             "reply": "Vui long nhap noi dung can hoi.",
             "error": "Message is required.",
         }, status=400)
+
+    conversation_state = request.session.get("ai_chatbot_state", {})
+    order_result = handle_order_status_chat(
+        message,
+        user=request.user,
+        conversation_state=conversation_state,
+    )
+    if order_result is not None:
+        next_state = order_result.get("conversation_state", {})
+        if next_state:
+            request.session["ai_chatbot_state"] = next_state
+        elif "ai_chatbot_state" in request.session:
+            del request.session["ai_chatbot_state"]
+
+        return JsonResponse({
+            "reply": order_result.get("reply", ""),
+            "products": [],
+            "conversation_state": {
+                ORDER_CHAT_STATE_KEY: bool(next_state.get(ORDER_CHAT_STATE_KEY)),
+            },
+        })
 
     try:
         result = ecommerce_chatbot(

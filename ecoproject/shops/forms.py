@@ -102,6 +102,26 @@ class AfterSalesRequestUpdateForm(forms.ModelForm):
             "refund_amount": forms.NumberInput(attrs={"class": "form-control form-control-sm", "min": 0}),
             "resolution_note": forms.Textarea(attrs={"class": "form-control form-control-sm", "rows": 2}),
         }
+
+
+class RefundRequestForm(forms.ModelForm):
+    class Meta:
+        model = AfterSalesRequest
+        fields = ["reason", "contact_name", "contact_email", "contact_phone"]
+        widgets = {
+            "reason": forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+            "contact_name": forms.TextInput(attrs={"class": "form-control"}),
+            "contact_email": forms.EmailInput(attrs={"class": "form-control"}),
+            "contact_phone": forms.TextInput(attrs={"class": "form-control"}),
+        }
+
+    def __init__(self, *args, order=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not order:
+            return
+        self.fields["contact_name"].initial = order.customer_name
+        self.fields["contact_email"].initial = order.customer_email
+        self.fields["contact_phone"].initial = order.phone
     
 class CouponCreateForm(forms.ModelForm):
 

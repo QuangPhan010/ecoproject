@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 import uuid
 from unittest.mock import patch
@@ -720,6 +721,85 @@ class CartUpdateStockValidationTests(TestCase):
         self.assertRedirects(response, reverse("shops:cart_detail"))
         messages = [message.message for message in get_messages(response.wsgi_request)]
         self.assertIn("Phone Z chỉ còn 1 sản phẩm.", messages)
+
+
+class AiChatbotOrderTrackingTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.user = self.user_model.objects.create_user(
+            username="chatbuyer",
+            password="pass12345",
+            email="chatbuyer@example.com",
+        )
+        Profile.objects.create(user=self.user, phone="0900000002", address="HCM")
+        self.client.force_login(self.user)
+
+        self.product = Product.objects.create(
+            name="Chatbot Phone",
+            slug="chatbot-phone",
+            price=3000000,
+            image="https://example.com/chatbot-phone.jpg",
+            stock=10,
+            reserved_stock=0,
+            available=True,
+        )
+        self.order = Order.objects.create(
+            user=self.user,
+            address="HCM",
+            phone="0900000002",
+            total_price=self.product.price,
+            status="Shipped",
+            payment_method="COD",
+            tracking_code="ABC123",
+        )
+        OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            price=self.product.price,
+            quantity=1,
+        )
+        OrderStatusLog.objects.create(
+            order=self.order,
+            from_status="Processing",
+            to_status="Shipped",
+            source="test",
+        )
+
+    @patch("shops.ai.chatbot.ask_gemini")
+    def test_chatbot_prompts_for_order_code_before_lookup(self, mock_ask_gemini):
+        response = self.client.post(
+            reverse("shops:ai_chat"),
+            data=json.dumps({"message": "Đơn hàng của tôi đâu?"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["reply"], "Bạn hãy nhập mã đơn hàng.")
+        self.assertEqual(
+            self.client.session.get("ai_chatbot_state", {}).get("awaiting_order_code"),
+            True,
+        )
+        mock_ask_gemini.assert_not_called()
+
+    @patch("shops.ai.chatbot.ask_gemini")
+    def test_chatbot_returns_order_status_after_receiving_code(self, mock_ask_gemini):
+        session = self.client.session
+        session["ai_chatbot_state"] = {"awaiting_order_code": True}
+        session.save()
+
+        response = self.client.post(
+            reverse("shops:ai_chat"),
+            data=json.dumps({"message": "ABC123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("Đơn hàng #", payload["reply"])
+        self.assertIn("Đang giao", payload["reply"])
+        self.assertNotIn("ai_chatbot_state", self.client.session)
+        mock_ask_gemini.assert_not_called()
 
 
 class ShopStatsViewTests(TestCase):

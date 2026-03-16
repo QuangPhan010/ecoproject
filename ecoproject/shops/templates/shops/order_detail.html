@@ -60,6 +60,10 @@
         <span class="badge text-bg-primary badge-status">Đang giao</span>
         {% elif order.status == "Delivered" %}
         <span class="badge text-bg-success badge-status">Hoàn thành</span>
+        {% elif order.status == "ReturnRequested" %}
+        <span class="badge text-bg-warning badge-status">Yêu cầu hoàn trả</span>
+        {% elif order.status == "Returned" %}
+        <span class="badge text-bg-secondary badge-status">Đã hoàn trả</span>
         {% elif order.status == "Cancelled" %}
         <span class="badge text-bg-secondary badge-status">Đã huỷ</span>
         {% else %}
@@ -225,32 +229,14 @@
     <div class="row g-3 mt-1">
       <div class="col-lg-6">
         <div class="summary-box">
-          <div class="fw-semibold mb-2">Yêu cầu đổi/trả/hoàn tiền</div>
+          <div class="fw-semibold mb-2">Yêu cầu trả hàng / hoàn tiền</div>
           {% if can_create_after_sales_request and not is_admin %}
-          <form method="post" action="{% url 'shops:create_after_sales_request' order.id %}">
-            {% csrf_token %}
-            <div class="mb-2">
-              <label class="form-label small">Loại yêu cầu</label>
-              {{ after_sales_form.request_type }}
-            </div>
-            <div class="mb-2">
-              <label class="form-label small">Lý do</label>
-              {{ after_sales_form.reason }}
-            </div>
-            <div class="mb-2">
-              <label class="form-label small">Tên liên hệ</label>
-              {{ after_sales_form.contact_name }}
-            </div>
-            <div class="mb-2">
-              <label class="form-label small">Email liên hệ</label>
-              {{ after_sales_form.contact_email }}
-            </div>
-            <div class="mb-3">
-              <label class="form-label small">SĐT liên hệ</label>
-              {{ after_sales_form.contact_phone }}
-            </div>
-            <button class="btn btn-outline-primary">Gửi yêu cầu</button>
-          </form>
+          <p class="small text-muted mb-2">
+            Sau khi đơn hàng ở trạng thái hoàn thành, bạn có thể gửi yêu cầu trả hàng/hoàn tiền trong thời gian quy định.
+          </p>
+          <a href="{% url 'shops:refund_request_create' order.id %}" class="btn btn-outline-primary">
+            Trả hàng / Hoàn tiền
+          </a>
           {% elif not can_create_after_sales_request %}
           <div class="text-muted small">Chỉ có thể tạo yêu cầu sau khi đơn hàng ở trạng thái hoàn thành.</div>
           {% else %}
@@ -281,6 +267,18 @@
               {% endif %}
               {% if req.refund_amount > 0 %}
               <div class="small mt-1"><strong>Số tiền hoàn:</strong> {{ req.refund_amount|intcomma }}₫</div>
+              {% endif %}
+              {% if req.images.all %}
+              <div class="small mt-2">
+                <strong>Ảnh minh chứng:</strong>
+                <div class="d-flex flex-wrap gap-2 mt-1">
+                  {% for img in req.images.all %}
+                  <a href="{{ img.image.url }}" target="_blank">
+                    <img src="{{ img.image.url }}" alt="Ảnh minh chứng" style="width:64px;height:64px;object-fit:cover;border-radius:6px;">
+                  </a>
+                  {% endfor %}
+                </div>
+              </div>
               {% endif %}
               {% if is_admin %}
               <form method="post" action="{% url 'shops:update_after_sales_request' req.id %}" class="mt-3">

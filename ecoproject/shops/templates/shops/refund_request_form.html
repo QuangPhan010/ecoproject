@@ -1,0 +1,72 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+
+{% block title %}Yêu cầu trả hàng đơn #{{ order.id }} | QShop{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+  <div class="mb-3">
+    <a href="{% url 'shops:order_detail' order.id %}" class="btn btn-outline-secondary btn-sm">
+      ← Quay lại chi tiết đơn
+    </a>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header bg-white">
+      <h5 class="mb-0">Yêu cầu trả hàng / hoàn tiền</h5>
+      <div class="text-muted small mt-1">
+        Đơn hàng #{{ order.id }} - tạo ngày {{ order.created_at|date:"d/m/Y H:i" }}
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="mb-3 p-3 border rounded bg-light">
+        <div class="fw-semibold mb-1">Thông tin đơn hàng</div>
+        <div class="small">
+          Người nhận: {{ order.customer_name }}<br>
+          SĐT: {{ order.phone }}<br>
+          Địa chỉ: {{ order.address }}<br>
+          Tổng thanh toán: <strong>{{ order.total_price|intcomma }}₫</strong>
+        </div>
+      </div>
+
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label">Lý do trả hàng / hoàn tiền</label>
+          {{ form.reason }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Tên liên hệ</label>
+          {{ form.contact_name }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Email liên hệ</label>
+          {{ form.contact_email }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Số điện thoại liên hệ</label>
+          {{ form.contact_phone }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Ảnh minh chứng (có thể chọn nhiều ảnh)</label>
+          <input
+            type="file"
+            name="images"
+            class="form-control"
+            accept="image/*"
+            multiple
+          >
+          <div class="form-text">
+            Vui lòng chụp rõ sản phẩm, bao bì và lỗi (nếu có).
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+          Gửi yêu cầu trả hàng / hoàn tiền
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

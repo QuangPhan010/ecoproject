@@ -342,16 +342,37 @@
               </a>
             </li>
 
-            <li class="nav-item">
-              <a class="nav-link" href="{% url 'shops:order_history' %}">
+            <li class="nav-item dropdown">
+              <a
+                class="nav-link dropdown-toggle"
+                href="#"
+                role="button"
+                data-bs-toggle="dropdown"
+              >
                 <i class="bi bi-receipt me-1"></i> Đơn hàng
               </a>
+              <ul class="dropdown-menu">
+                <li>
+                  <a class="dropdown-item" href="{% url 'shops:order_history' %}">
+                    📦 Danh sách đơn hàng
+                  </a>
+                </li>
+                {% if request.user.is_authenticated and request.user.is_staff or request.user.is_superuser %}
+                <li>
+                  <a class="dropdown-item" href="{% url 'shops:refund_request_list' %}">
+                    🔁 Yêu cầu hoàn trả
+                  </a>
+                </li>
+                {% else %}
+                <li>
+                  <a class="dropdown-item" href="{% url 'shops:refund_request_list' %}">
+                    🔁 Yêu cầu hoàn trả của tôi
+                  </a>
+                </li>
+                {% endif %}
+              </ul>
             </li>
-            <li class="nav-item">
-              <a class="nav-link" href="{% url 'users:minigame' %}">
-                <i class="bi bi-controller me-1"></i> Minigame
-              </a>
-            </li>
+            {# Minigame sẽ chuyển vào dropdown user #}
 
             {% if request.user.is_authenticated and request.user.is_staff or request.user.is_superuser %}
             <li class="nav-item">
@@ -393,15 +414,6 @@
 
           <!-- RIGHT -->
           <ul class="navbar-nav ms-auto align-items-center">
-            <li class="nav-item me-2">
-              <a class="nav-link" href="{% url 'shops:wishlist' %}">
-                <i class="bi bi-heart"></i>
-                <span class="badge bg-danger rounded-pill mini-badge"
-                  >{{ wishlist_items_count }}</span
-                >
-              </a>
-            </li>
-
             <li class="nav-item me-2">
               <a class="nav-link" href="{% url 'shops:compare' %}">
                 <i class="bi bi-columns-gap"></i>
@@ -545,8 +557,21 @@
                   >
                 </li>
                 <li>
-                  <a class="dropdown-item" href="#"
+                  <a class="dropdown-item" href="{% url 'shops:order_history' %}"
                     ><i class="bi bi-bag me-2"></i>Đơn mua</a
+                  >
+                </li>
+                <li>
+                  <a class="dropdown-item" href="{% url 'shops:wishlist' %}"
+                    ><i class="bi bi-heart me-2"></i>Yêu thích
+                    <span class="badge bg-danger rounded-pill mini-badge"
+                      >{{ wishlist_items_count }}</span
+                    >
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="{% url 'users:minigame' %}"
+                    ><i class="bi bi-controller me-2"></i>Minigame</a
                   >
                 </li>
                 <li>

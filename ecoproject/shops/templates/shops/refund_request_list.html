@@ -1,0 +1,84 @@
+{% extends "shops/base.html" %}
+{% load humanize %}
+
+{% block title %}Yêu cầu hoàn trả | QShop{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">
+      <i class="bi bi-arrow-counterclockwise me-1"></i>
+      Yêu cầu hoàn trả
+    </h4>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      {% if requests %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>#</th>
+              {% if is_admin %}
+              <th>Khách hàng</th>
+              {% endif %}
+              <th>Đơn hàng</th>
+              <th>Loại</th>
+              <th>Trạng thái</th>
+              <th>Thời gian</th>
+              <th>Số tiền hoàn</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for req in requests %}
+            <tr>
+              <td>{{ req.id }}</td>
+              {% if is_admin %}
+              <td>
+                {% if req.order.user %}
+                {{ req.order.user.username }}
+                {% else %}
+                Khách vãng lai
+                {% endif %}
+              </td>
+              {% endif %}
+              <td>
+                <a href="{% url 'shops:order_detail' req.order.id %}">
+                  #{{ req.order.id }}
+                </a>
+              </td>
+              <td>{{ req.get_request_type_display }}</td>
+              <td>{{ req.get_status_display }}</td>
+              <td>{{ req.created_at|date:"d/m/Y H:i" }}</td>
+              <td>
+                {% if req.refund_amount > 0 %}
+                {{ req.refund_amount|intcomma }}₫
+                {% else %}
+                -
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <a
+                  href="{% url 'shops:order_detail' req.order.id %}"
+                  class="btn btn-sm btn-outline-primary"
+                >
+                  Xem chi tiết
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-muted small">
+        Chưa có yêu cầu hoàn trả nào.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+

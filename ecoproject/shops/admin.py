@@ -80,7 +80,9 @@ class OrderAdmin(admin.ModelAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         readonly = ["paid"]
-        if obj and obj.status in ['Shipped', 'Delivered']:
+        # Allow admin to move Delivered -> ReturnRequested -> Returned.
+        # Lock status only once shipped (handed to carrier) or fully returned.
+        if obj and obj.status in [Order.STATUS_SHIPPED, Order.STATUS_RETURNED]:
             readonly.append("status")
         return tuple(readonly)
 
